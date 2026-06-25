@@ -786,12 +786,16 @@ function LoginScreen({ lang, setLang, onLogin }) {
     if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
     setLoading(true);setErr("");
     try{
-      if(!verifierRef.current){
-        const container=document.createElement("div");
-        document.body.appendChild(container);
-        verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
-        verifierRef.current._container=container;
-      }
+      // Always clear before creating new verifier to avoid "already rendered" error
+      try{verifierRef.current?.clear();}catch{}
+      try{verifierRef.current?._container?.remove();}catch{}
+      verifierRef.current=null;
+
+      const container=document.createElement("div");
+      document.body.appendChild(container);
+      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
+      verifierRef.current._container=container;
+
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
       setStep("otp");
