@@ -793,7 +793,9 @@ function LoginScreen({ lang, setLang, onLogin }) {
     }catch(e:any){
       console.error("Firebase Phone Auth error:",e.code, e.message);
       setErr((lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.")+` (${e.code||e.message})`);
-      try{verifierRef.current?.clear();verifierRef.current=null;}catch{}
+      try{verifierRef.current?.clear();}catch{}
+      verifierRef.current=null;
+      try{const el=document.getElementById("recaptcha-container");if(el)el.innerHTML="";}catch{}
     }
     setLoading(false);
   };
