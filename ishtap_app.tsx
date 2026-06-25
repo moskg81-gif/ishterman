@@ -736,6 +736,17 @@ function LoginScreen({ lang, setLang, onLogin }) {
   const verifierRef = useRef<any>(null);
 
   useEffect(()=>{
+    // Init RecaptchaVerifier once on mount (runs once in production)
+    const container=document.createElement("div");
+    document.body.appendChild(container);
+    try{
+      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
+      verifierRef.current._container=container;
+    }catch(e){
+      console.error("RecaptchaVerifier init error:",e);
+      container.remove();
+    }
+
     let ctx=null;
     try{
       ctx=new(window.AudioContext||window.webkitAudioContext)();
@@ -784,17 +795,12 @@ function LoginScreen({ lang, setLang, onLogin }) {
   const sendOtp=async()=>{
     const p=phone.replace(/\s/g,"");
     if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
+    if(!verifierRef.current){setErr(lang==="ru"?"Ошибка инициализации. Перезагрузите страницу.":"Катаны баштапкы абалга келтириңиз. Баракты жаңыртыңыз.");return;}
     setLoading(true);setErr("");
     try{
-      // Always clear before creating new verifier to avoid "already rendered" error
-      try{verifierRef.current?.clear();}catch{}
-      try{verifierRef.current?._container?.remove();}catch{}
-      verifierRef.current=null;
-
-      const container=document.createElement("div");
-      document.body.appendChild(container);
-      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
-      verifierRef.current._container=container;
+      // Reset widget if already rendered (for retries)
+      const wid=verifierRef.current.widgetId;
+      if(wid!=null){try{(window as any).grecaptcha?.reset(wid);}catch{}}
 
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
@@ -802,9 +808,8 @@ function LoginScreen({ lang, setLang, onLogin }) {
     }catch(e:any){
       console.error("Firebase Phone Auth error:",e.code, e.message);
       setErr((lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.")+` (${e.code||e.message})`);
-      try{verifierRef.current?.clear();}catch{}
-      try{verifierRef.current?._container?.remove();}catch{}
-      verifierRef.current=null;
+      // Reset widget for next attempt
+      try{const wid=verifierRef.current?.widgetId;if(wid!=null)(window as any).grecaptcha?.reset(wid);}catch{}
     }
     setLoading(false);
   };
