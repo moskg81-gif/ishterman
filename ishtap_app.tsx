@@ -767,6 +767,18 @@ function LoginScreen({ lang, setLang, onLogin }) {
     };
   },[]);
 
+  useEffect(()=>{
+    const timer=setTimeout(()=>{
+      try{
+        if(!verifierRef.current){
+          verifierRef.current=new RecaptchaVerifier(fbAuth,"recaptcha-container",{size:"invisible"});
+          verifierRef.current.render();
+        }
+      }catch(e){console.error("RecaptchaVerifier init error:",e);}
+    },500);
+    return()=>{clearTimeout(timer);};
+  },[]);
+
   const fmtPhone=(v)=>{
     let d=v.replace(/\D/g,"");
     if(d.startsWith("996"))d=d.slice(3);
