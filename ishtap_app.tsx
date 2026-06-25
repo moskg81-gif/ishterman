@@ -795,9 +795,6 @@ function LoginScreen({ lang, setLang, onLogin }) {
     if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
     setLoading(true);setErr("");
     try{
-      if(!verifierRef.current){
-        verifierRef.current=new RecaptchaVerifier(fbAuth,"recaptcha-container",{size:"invisible"});
-      }
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
       setStep("otp");
