@@ -764,6 +764,8 @@ function LoginScreen({ lang, setLang, onLogin }) {
     return()=>{
       try{ctx&&ctx.close();}catch{}
       try{verifierRef.current?.clear();}catch{}
+      try{verifierRef.current?._container?.remove();}catch{}
+      verifierRef.current=null;
     };
   },[]);
 
@@ -785,7 +787,10 @@ function LoginScreen({ lang, setLang, onLogin }) {
     setLoading(true);setErr("");
     try{
       if(!verifierRef.current){
-        verifierRef.current=new RecaptchaVerifier(fbAuth,"recaptcha-container",{size:"invisible"});
+        const container=document.createElement("div");
+        document.body.appendChild(container);
+        verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
+        verifierRef.current._container=container;
       }
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
@@ -794,8 +799,8 @@ function LoginScreen({ lang, setLang, onLogin }) {
       console.error("Firebase Phone Auth error:",e.code, e.message);
       setErr((lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.")+` (${e.code||e.message})`);
       try{verifierRef.current?.clear();}catch{}
+      try{verifierRef.current?._container?.remove();}catch{}
       verifierRef.current=null;
-      try{const el=document.getElementById("recaptcha-container");if(el)el.innerHTML="";}catch{}
     }
     setLoading(false);
   };
@@ -909,7 +914,7 @@ function LoginScreen({ lang, setLang, onLogin }) {
               style={{width:"100%",padding:"13px 0",borderRadius:12,background:"linear-gradient(145deg,#00e052,#00C244)",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 5px 0 #007a2a,0 8px 16px rgba(0,194,68,0.35)",opacity:loading?0.7:1}}>
               {loading?(lang==="ru"?"Проверка...":"Текшерилүүдө..."):(lang==="ru"?"Подтвердить":"Ырастоо")}
             </button>
-            <button onClick={()=>{setStep("phone");setOtp("");setErr("");try{verifierRef.current?.clear();verifierRef.current=null;}catch{}}}
+            <button onClick={()=>{setStep("phone");setOtp("");setErr("");try{verifierRef.current?.clear();}catch{};try{verifierRef.current?._container?.remove();}catch{};verifierRef.current=null;}}
               style={{width:"100%",marginTop:10,padding:"8px 0",background:"none",border:"none",cursor:"pointer",fontSize:13,color:"var(--color-text-secondary,#888)"}}>
               ← {lang==="ru"?"Изменить номер":"Номерди өзгөртүү"}
             </button>
