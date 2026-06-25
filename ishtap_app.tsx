@@ -771,11 +771,7 @@ function LoginScreen({ lang, setLang, onLogin }) {
     const timer=setTimeout(()=>{
       try{
         if(!verifierRef.current){
-          verifierRef.current=new RecaptchaVerifier(fbAuth,"recaptcha-container",{
-            size:"normal",
-            callback:()=>{},
-            "expired-callback":()=>{try{verifierRef.current?.clear();verifierRef.current=null;}catch{}}
-          });
+          verifierRef.current=new RecaptchaVerifier(fbAuth,"recaptcha-container",{size:"invisible"});
           verifierRef.current.render();
         }
       }catch(e){console.error("RecaptchaVerifier init error:",e);}
