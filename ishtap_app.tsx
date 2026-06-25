@@ -736,17 +736,6 @@ function LoginScreen({ lang, setLang, onLogin }) {
   const verifierRef = useRef<any>(null);
 
   useEffect(()=>{
-    // Init RecaptchaVerifier once on mount (runs once in production)
-    const container=document.createElement("div");
-    document.body.appendChild(container);
-    try{
-      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
-      verifierRef.current._container=container;
-    }catch(e){
-      console.error("RecaptchaVerifier init error:",e);
-      container.remove();
-    }
-
     let ctx=null;
     try{
       ctx=new(window.AudioContext||window.webkitAudioContext)();
@@ -772,12 +761,7 @@ function LoginScreen({ lang, setLang, onLogin }) {
       sub(80,0.6,0.6,0.4);sub(120,0.61,0.4,0.2);
       setTimeout(()=>{try{ctx&&ctx.close();}catch{}},2000);
     }catch{}
-    return()=>{
-      try{ctx&&ctx.close();}catch{}
-      try{verifierRef.current?.clear();}catch{}
-      try{verifierRef.current?._container?.remove();}catch{}
-      verifierRef.current=null;
-    };
+    return()=>{try{ctx&&ctx.close();}catch{}};
   },[]);
 
 
@@ -795,21 +779,19 @@ function LoginScreen({ lang, setLang, onLogin }) {
   const sendOtp=async()=>{
     const p=phone.replace(/\s/g,"");
     if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
-    if(!verifierRef.current){setErr(lang==="ru"?"Ошибка инициализации. Перезагрузите страницу.":"Катаны баштапкы абалга келтириңиз. Баракты жаңыртыңыз.");return;}
     setLoading(true);setErr("");
     try{
-      // Reset widget if already rendered (for retries)
-      const wid=verifierRef.current.widgetId;
-      if(wid!=null){try{(window as any).grecaptcha?.reset(wid);}catch{}}
-
+      try{verifierRef.current?.clear();}catch{}
+      verifierRef.current=null;
+      const container=document.createElement("div");
+      document.body.appendChild(container);
+      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
       setStep("otp");
     }catch(e:any){
       console.error("Firebase Phone Auth error:",e.code, e.message);
       setErr((lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.")+` (${e.code||e.message})`);
-      // Reset widget for next attempt
-      try{const wid=verifierRef.current?.widgetId;if(wid!=null)(window as any).grecaptcha?.reset(wid);}catch{}
     }
     setLoading(false);
   };
@@ -879,7 +861,6 @@ function LoginScreen({ lang, setLang, onLogin }) {
 
   return (
     <div className="fi" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
-      <div id="recaptcha-container"/>
       <div style={{background:"var(--color-background-primary,#fff)",borderBottom:"0.5px solid var(--color-border-tertiary,#e0e0e0)",padding:"12px 16px",display:"flex",justifyContent:"center",alignItems:"center",gap:8,flexShrink:0}}>
         <img src="/новый логотип на кыргызском.png" alt="logo" style={{width:28,height:28,borderRadius:"50%",objectFit:"cover"}}/>
         <span style={{fontSize:18,fontWeight:700,color:"#F57C00"}}>Иштерман</span>
