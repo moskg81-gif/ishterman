@@ -473,7 +473,6 @@ const firebaseConfig = {
   storageBucket: "ishterman-6e62e.firebasestorage.app",
   messagingSenderId: "290713684597",
   appId: "1:290713684597:web:5cf3ccf8e1e61fb72d063c",
-  recaptchaEnterpriseKey: "6LcGpDYtAAAAACE66Wh3rKUb_AHywD8Zk9v9nRwG",
 };
 const fbApp  = initializeApp(firebaseConfig);
 const fbAuth = getAuth(fbApp);
