@@ -781,7 +781,6 @@ function LoginScreen({ lang, setLang, onLogin }) {
     if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
     setLoading(true);setErr("");
     try{
-      await initializeRecaptchaConfig(fbAuth);
       try{verifierRef.current?.clear();}catch{}
       verifierRef.current=null;
       const container=document.createElement("div");
