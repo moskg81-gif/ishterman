@@ -1,6 +1,6 @@
 import { useState, useRef, createContext, useContext, useEffect, useCallback, useMemo } from "react";
 import { initializeApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInWithPhoneNumber, RecaptchaVerifier } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInWithPhoneNumber, RecaptchaVerifier, initializeRecaptchaConfig } from "firebase/auth";
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "firebase/firestore";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -786,6 +786,7 @@ function LoginScreen({ lang, setLang, onLogin }) {
       const container=document.createElement("div");
       document.body.appendChild(container);
       verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
+      await initializeRecaptchaConfig(fbAuth);
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
       setStep("otp");
