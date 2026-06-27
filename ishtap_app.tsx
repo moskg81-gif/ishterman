@@ -780,18 +780,32 @@ function LoginScreen({ lang, setLang, onLogin }) {
     const p=phone.replace(/\s/g,"");
     if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
     setLoading(true);setErr("");
+    console.log("[SMS] Отправка кода на",p);
     try{
       try{verifierRef.current?.clear();}catch{}
       verifierRef.current=null;
+      const containerId="recaptcha-"+Date.now();
       const container=document.createElement("div");
+      container.id=containerId;
       document.body.appendChild(container);
       verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
+      console.log("[SMS] Код отправлен успешно");
       setStep("otp");
     }catch(e:any){
-      console.error("Firebase Phone Auth error:",e.code, e.message);
-      setErr((lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.")+` (${e.code||e.message})`);
+      console.error("[SMS] Ошибка:",e.code, e.message);
+      try{verifierRef.current?.clear();}catch{}
+      verifierRef.current=null;
+      let msg="";
+      if(e.code==="auth/too-many-requests"){
+        msg=lang==="ru"?"Превышен лимит попыток. Попробуйте через 24 часа.":"Аракет саны ашып кетти. 24 сааттан кийин аракет кылыңыз.";
+      } else if(e.code==="auth/error-code:-39"||e.message?.includes("503")||e.message?.includes("error-code:-39")){
+        msg=lang==="ru"?"Сервис временно недоступен. Попробуйте позже или войдите по email.":"Кызмат убактылуу жеткиликсиз. Кийинчерээк же email аркылуу кириңиз.";
+      } else {
+        msg=lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.";
+      }
+      setErr(msg);
     }
     setLoading(false);
   };
