@@ -2336,7 +2336,6 @@ const getTabsCfg = role => role==="executor"
 
 // ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  if(window.location.pathname==="/admin") return <AdminDashboard/>;
   const [lang,setLang]         = useState("ru");
   const [authState,setAuthState] = useState(null);
   const [currentUser,setCurrentUser] = useState(null);
@@ -2558,7 +2557,7 @@ export default function App() {
 }
 
 // ─── ADMIN DASHBOARD (браузерная страница /admin) ───────────────────────────
-function AdminDashboard() {
+export function AdminDashboard() {
   const [authed,setAuthed]   = React.useState(false);
   const [email,setEmail]     = React.useState("");
   const [pass,setPass]       = React.useState("");
