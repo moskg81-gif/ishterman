@@ -2558,14 +2558,14 @@ export default function App() {
 
 // ─── ADMIN DASHBOARD (браузерная страница /admin) ───────────────────────────
 export function AdminDashboard() {
-  const [authed,setAuthed]   = React.useState(false);
-  const [email,setEmail]     = React.useState("");
-  const [pass,setPass]       = React.useState("");
-  const [err,setErr]         = React.useState("");
-  const [loading,setLoading] = React.useState(false);
-  const [stats,setStats]     = React.useState<any>(null);
-  const [statsLoading,setStatsLoading] = React.useState(false);
-  const [lastRefresh,setLastRefresh]   = React.useState<Date|null>(null);
+  const [authed,setAuthed]   = useState(false);
+  const [email,setEmail]     = useState("");
+  const [pass,setPass]       = useState("");
+  const [err,setErr]         = useState("");
+  const [loading,setLoading] = useState(false);
+  const [stats,setStats]     = useState<any>(null);
+  const [statsLoading,setStatsLoading] = useState(false);
+  const [lastRefresh,setLastRefresh]   = useState<Date|null>(null);
 
   const login = async()=>{
     setLoading(true);setErr("");
@@ -2578,14 +2578,14 @@ export function AdminDashboard() {
     setLoading(false);
   };
 
-  const loadStats = React.useCallback(async()=>{
+  const loadStats = useCallback(async()=>{
     setStatsLoading(true);
     const s=await fbGetAdminStats();
     if(s){setStats(s);setLastRefresh(new Date());}
     setStatsLoading(false);
   },[]);
 
-  React.useEffect(()=>{if(authed)loadStats();},[authed,loadStats]);
+  useEffect(()=>{if(authed)loadStats();},[authed,loadStats]);
 
   const logout=async()=>{await fbAuth.signOut();setAuthed(false);setStats(null);};
 
