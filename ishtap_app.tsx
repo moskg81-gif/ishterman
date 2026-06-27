@@ -785,7 +785,7 @@ function LoginScreen({ lang, setLang, onLogin }) {
       verifierRef.current=null;
       const container=document.createElement("div");
       document.body.appendChild(container);
-      verifierRef.current=new RecaptchaVerifier(container,{size:"invisible"},fbAuth);
+      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
       const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
       confirmRef.current=result;
       setStep("otp");
