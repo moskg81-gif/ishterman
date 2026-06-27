@@ -524,15 +524,25 @@ const fbGetAdminStats = async () => {
       getDocs(collection(fbDb,"responses")),
       getDocs(collection(fbDb,"reviews")),
     ]);
-    const tasksData = tasks.docs.map(d=>d.data());
+    const usersData  = users.docs.map(d=>d.data());
+    const tasksData  = tasks.docs.map(d=>d.data());
+    const recentUsers = [...usersData]
+      .filter(u=>u.createdAt)
+      .sort((a,b)=>b.createdAt-a.createdAt)
+      .slice(0,10)
+      .map(u=>({name:u.name||"—",phone:u.phone||"—",role:u.role||"—",createdAt:u.createdAt}));
     return {
-      users:     users.size,
-      tasks:     tasks.size,
+      users:          users.size,
+      customers:      usersData.filter(u=>u.role==="customer").length,
+      executors:      usersData.filter(u=>u.role==="executor").length,
+      tasks:          tasks.size,
       openTasks:      tasksData.filter(t=>t.status==="open").length,
       closedTasks:    tasksData.filter(t=>t.status==="closed_by_choice").length,
       completedTasks: tasksData.filter(t=>t.status==="completed").length,
-      responses:  responses.size,
-      reviews:    reviews.size,
+      cancelledTasks: tasksData.filter(t=>t.status==="cancelled").length,
+      responses:      responses.size,
+      reviews:        reviews.size,
+      recentUsers,
     };
   } catch(e) { console.warn(e); return null; }
 };
@@ -2326,6 +2336,7 @@ const getTabsCfg = role => role==="executor"
 
 // ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
+  if(window.location.pathname==="/admin") return <AdminDashboard/>;
   const [lang,setLang]         = useState("ru");
   const [authState,setAuthState] = useState(null);
   const [currentUser,setCurrentUser] = useState(null);
@@ -2543,5 +2554,220 @@ export default function App() {
         )}
       </div>
     </Ctx.Provider>
+  );
+}
+
+// ─── ADMIN DASHBOARD (браузерная страница /admin) ───────────────────────────
+function AdminDashboard() {
+  const [authed,setAuthed]   = React.useState(false);
+  const [email,setEmail]     = React.useState("");
+  const [pass,setPass]       = React.useState("");
+  const [err,setErr]         = React.useState("");
+  const [loading,setLoading] = React.useState(false);
+  const [stats,setStats]     = React.useState<any>(null);
+  const [statsLoading,setStatsLoading] = React.useState(false);
+  const [lastRefresh,setLastRefresh]   = React.useState<Date|null>(null);
+
+  const login = async()=>{
+    setLoading(true);setErr("");
+    try{
+      const {signInWithEmailAndPassword:signIn}=await import("firebase/auth");
+      const cred=await signIn(fbAuth,email,pass);
+      if(cred.user.email!==ADMIN_EMAIL){setErr("Доступ запрещён");await fbAuth.signOut();setLoading(false);return;}
+      setAuthed(true);
+    }catch(e:any){setErr("Неверный email или пароль");}
+    setLoading(false);
+  };
+
+  const loadStats = React.useCallback(async()=>{
+    setStatsLoading(true);
+    const s=await fbGetAdminStats();
+    if(s){setStats(s);setLastRefresh(new Date());}
+    setStatsLoading(false);
+  },[]);
+
+  React.useEffect(()=>{if(authed)loadStats();},[authed,loadStats]);
+
+  const logout=async()=>{await fbAuth.signOut();setAuthed(false);setStats(null);};
+
+  const SUBS=[
+    {name:"Firebase (Blaze)",color:"#F57C00",icon:"🔥",items:[
+      {label:"SMS лимит",value:"~2500/мес ($25 бюджет)"},
+      {label:"Firestore",value:"50k чтений/день бесплатно"},
+      {label:"Тариф",value:"Blaze — pay as you go"},
+      {label:"Управление",href:"https://console.firebase.google.com",text:"Firebase Console"},
+    ]},
+    {name:"Vercel (Хостинг)",color:"#000",icon:"▲",items:[
+      {label:"Трафик",value:"100 ГБ/месяц"},
+      {label:"Деплои",value:"Неограниченно"},
+      {label:"Тариф",value:"Hobby — бесплатно"},
+      {label:"Управление",href:"https://vercel.com/dashboard",text:"Vercel Dashboard"},
+    ]},
+    {name:"GitHub (Репозиторий)",color:"#24292e",icon:"🐙",items:[
+      {label:"Репозиторий",value:"moskg81-gif/ishterman"},
+      {label:"Тариф",value:"Free"},
+      {label:"Управление",href:"https://github.com/moskg81-gif/ishterman",text:"GitHub Repo"},
+    ]},
+  ];
+
+  const statCards=[
+    {icon:"👥",label:"Всего пользователей",key:"users",color:"#185FA5"},
+    {icon:"🧑‍💼",label:"Заказчики",key:"customers",color:"#1565C0"},
+    {icon:"🔨",label:"Исполнители",key:"executors",color:"#0F6E56"},
+    {icon:"📋",label:"Всего заданий",key:"tasks",color:"#7C3D99"},
+    {icon:"🟢",label:"Активные задания",key:"openTasks",color:"#2E7D32"},
+    {icon:"🔵",label:"В работе",key:"closedTasks",color:"#1565C0"},
+    {icon:"✅",label:"Завершённые",key:"completedTasks",color:"#388E3C"},
+    {icon:"❌",label:"Отменённые",key:"cancelledTasks",color:"#C62828"},
+    {icon:"💬",label:"Откликов",key:"responses",color:"#B05E0A"},
+    {icon:"⭐",label:"Отзывов",key:"reviews",color:"#F9A825"},
+  ];
+
+  const s:React.CSSProperties={fontFamily:"system-ui,sans-serif"};
+
+  if(!authed) return (
+    <div style={{...s,minHeight:"100vh",background:"#f5f5f5",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:36,width:340,boxShadow:"0 4px 24px rgba(0,0,0,0.1)"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:40,marginBottom:8}}>👑</div>
+          <h2 style={{margin:0,fontSize:20,fontWeight:700}}>Иштерман Admin</h2>
+          <p style={{margin:"4px 0 0",fontSize:13,color:"#888"}}>Панель управления</p>
+        </div>
+        {err&&<div style={{background:"#FFF3F3",border:"1px solid #FFCDD2",borderRadius:8,padding:"10px 14px",marginBottom:16,color:"#C62828",fontSize:13}}>{err}</div>}
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email администратора"
+          style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #ddd",fontSize:14,marginBottom:10,boxSizing:"border-box"}}/>
+        <input value={pass} onChange={e=>setPass(e.target.value)} type="password" placeholder="Пароль"
+          onKeyDown={e=>e.key==="Enter"&&login()}
+          style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #ddd",fontSize:14,marginBottom:16,boxSizing:"border-box"}}/>
+        <button onClick={login} disabled={loading}
+          style={{width:"100%",padding:"12px",borderRadius:8,background:"#185FA5",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer"}}>
+          {loading?"Вход...":"Войти"}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{...s,minHeight:"100vh",background:"#f0f4f8"}}>
+      {/* Header */}
+      <div style={{background:"#185FA5",color:"#fff",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:22}}>👑</span>
+          <div>
+            <div style={{fontWeight:700,fontSize:16}}>Иштерман — Admin Panel</div>
+            <div style={{fontSize:11,opacity:0.75}}>{lastRefresh?"Обновлено: "+lastRefresh.toLocaleTimeString("ru-RU"):""}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <button onClick={loadStats} disabled={statsLoading}
+            style={{padding:"7px 16px",borderRadius:8,background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",cursor:"pointer",fontSize:13}}>
+            {statsLoading?"⏳ Загрузка...":"🔄 Обновить"}
+          </button>
+          <button onClick={logout}
+            style={{padding:"7px 16px",borderRadius:8,background:"rgba(255,0,0,0.2)",color:"#fff",border:"1px solid rgba(255,100,100,0.4)",cursor:"pointer",fontSize:13}}>
+            Выйти
+          </button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:1100,margin:"0 auto",padding:"24px 20px"}}>
+
+        {/* Stats Grid */}
+        <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:600,color:"#333"}}>📊 Статистика в реальном времени</h3>
+        {statsLoading&&!stats&&<div style={{textAlign:"center",padding:40,color:"#888"}}>Загрузка данных из Firestore...</div>}
+        {stats&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:28}}>
+            {statCards.map(c=>(
+              <div key={c.key} style={{background:"#fff",borderRadius:12,padding:"16px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:`4px solid ${c.color}`}}>
+                <div style={{fontSize:20,marginBottom:4}}>{c.icon}</div>
+                <div style={{fontSize:11,color:"#888",marginBottom:2}}>{c.label}</div>
+                <div style={{fontSize:28,fontWeight:700,color:c.color}}>{stats[c.key]??0}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Recent Registrations */}
+        {stats?.recentUsers?.length>0&&(
+          <div style={{marginBottom:28}}>
+            <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:600,color:"#333"}}>🆕 Последние регистрации</h3>
+            <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{background:"#f8f9fa"}}>
+                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Имя</th>
+                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Телефон</th>
+                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Роль</th>
+                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Дата</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.recentUsers.map((u:any,i:number)=>(
+                    <tr key={i} style={{borderBottom:"1px solid #f0f0f0"}}>
+                      <td style={{padding:"10px 16px",fontWeight:500}}>{u.name}</td>
+                      <td style={{padding:"10px 16px",color:"#555"}}>{u.phone}</td>
+                      <td style={{padding:"10px 16px"}}>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600,
+                          background:u.role==="customer"?"#E3F2FD":u.role==="executor"?"#E8F5E9":"#F3E8FF",
+                          color:u.role==="customer"?"#1565C0":u.role==="executor"?"#2E7D32":"#7C3D99"}}>
+                          {u.role==="customer"?"Заказчик":u.role==="executor"?"Исполнитель":u.role}
+                        </span>
+                      </td>
+                      <td style={{padding:"10px 16px",color:"#888",fontSize:12}}>
+                        {u.createdAt?new Date(u.createdAt).toLocaleDateString("ru-RU",{day:"2-digit",month:"short",year:"numeric"}):"—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Subscriptions */}
+        <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:600,color:"#333"}}>💳 Подписки и сервисы</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:16,marginBottom:28}}>
+          {SUBS.map(sub=>(
+            <div key={sub.name} style={{background:"#fff",borderRadius:12,padding:"18px 20px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderTop:`3px solid ${sub.color}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+                <span style={{fontSize:20}}>{sub.icon}</span>
+                <span style={{fontWeight:700,fontSize:14,color:"#222"}}>{sub.name}</span>
+              </div>
+              {sub.items.map((item:any,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<sub.items.length-1?"1px solid #f0f0f0":"none"}}>
+                  <span style={{fontSize:12,color:"#888"}}>{item.label}</span>
+                  {item.href
+                    ? <a href={item.href} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#185FA5",fontWeight:600}}>{item.text} ↗</a>
+                    : <span style={{fontSize:12,fontWeight:500,color:"#333"}}>{item.value}</span>
+                  }
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* App Health */}
+        <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:600,color:"#333"}}>🛡 Состояние приложения</h3>
+        <div style={{background:"#fff",borderRadius:12,padding:"18px 20px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",marginBottom:28}}>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {[
+              {label:"Vercel Деплой",status:"✅ Работает",color:"#2E7D32"},
+              {label:"Firebase Auth",status:"✅ Работает",color:"#2E7D32"},
+              {label:"Firestore DB",status:stats?"✅ Подключён":"⏳ Проверка...",color:stats?"#2E7D32":"#B05E0A"},
+              {label:"Firebase Phone Auth (SMS)",status:"⚠️ Ожидание ответа поддержки",color:"#B05E0A"},
+            ].map((item,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<3?"1px solid #f5f5f5":"none"}}>
+                <span style={{fontSize:13,color:"#555"}}>{item.label}</span>
+                <span style={{fontSize:13,fontWeight:600,color:item.color}}>{item.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{textAlign:"center",color:"#aaa",fontSize:12,paddingBottom:20}}>
+          Иштерман Admin Panel • {new Date().getFullYear()}
+        </div>
+      </div>
+    </div>
   );
 }
