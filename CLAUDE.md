@@ -48,7 +48,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Task lifecycle
 `open` → `closed_by_choice` (исполнитель выбран) → `completed`
 `open` → `cancelled` (заказчик отменил вручную)
-`open` → `closed_expired` (TTL 7 дней, проверяется каждые 60 сек)
+`open` → `closed_expired` (TTL 14 дней, проверяется каждые 60 сек)
 Реактивация (`closed_by_choice` → `open`) — максимум 3 раза на задание.
 
 Отменённые задания (`cancelled`) не отображаются в ленте. При отмене всем откликнувшимся исполнителям приходит уведомление.

@@ -3,3 +3,19 @@ dist/
 backups/
 .claude/
 *.local
+
+.vercel
+android-twa/
+
+.env*
+
+# Маркетинговые материалы и промо-видео — не для репозитория
+ads/
+*.mp4
+public/скрин*.jpeg
+public/флаг*.jpeg
+
+# Крупные исходники логотипов/промо (design working files)
+public/Логотип*
+public/Мужчина в колпаке*
+public/Новый знак*

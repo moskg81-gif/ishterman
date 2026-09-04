@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Публичный профиль — имя, аватар, роль и т.д. PIN здесь больше не хранится,
+    // поэтому массовое чтение для показа имён/аватаров по всему приложению безопасно.
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    // Аватарки (base64) хранятся отдельно от основного профиля users — так тяжёлые
+    // картинки не тянутся всем клиентам через общую подписку на users, а подгружаются
+    // по одному документу лениво, только когда аватар реально показывается на экране.
+    match /avatars/{userId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    // PIN-код хранится отдельно, ключ документа — номер телефона.
+    // Разрешено читать только один конкретный документ по известному номеру (get),
+    // а массовое скачивание всех PIN-кодов (list) запрещено полностью.
+    match /authSecrets/{phone} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.resource.data.keys().hasAll(['uid','pin'])
+                    && request.resource.data.pin is string
+                    && request.resource.data.pin.size() == 4
+                    && !exists(/databases/$(database)/documents/authSecrets/$(phone));
+      allow update, delete: if false;
+    }
+
+    match /tasks/{taskId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    // Фото/видео заданий (base64) хранятся отдельно от tasks — так тяжёлые картинки
+    // не тянутся всем клиентам через общую подписку на всю коллекцию tasks в ленте,
+    // а подгружаются по одному документу лениво, только когда открыт конкретный заказ.
+    match /taskMedia/{taskId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    match /responses/{responseId} {
+      allow read, create, update: if true;
+      allow delete: if false;
+    }
+
+    match /reviews/{reviewId} {
+      allow read, create: if true;
+      allow update, delete: if false;
+    }
+
+    match /notifications/{notifId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // Аналитика цен (гос. статистика КР) — читают все, обновляется вручную раз в месяц.
+    match /priceAnalytics/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    // Цены на услуги ("Уста пулу") — общая редактируемая табличка цен по городам,
+    // любой пользователь может обновить цену конкретной позиции для своего города.
+    match /servicePrices/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+
+    match /referrals/{userId} {
+      allow read: if true;
+      // Счётчик рефералов можно только увеличивать на 1 за раз и только для существующего пользователя —
+      // защита от произвольной накрутки числа приглашённых напрямую через консоль браузера
+      allow create: if request.resource.data.count == 1
+                    && exists(/databases/$(database)/documents/users/$(userId));
+      allow update: if request.resource.data.count == resource.data.count + 1;
+      allow delete: if false;
+    }
+  }
+}

@@ -1,7 +1,8 @@
 import { useState, useRef, createContext, useContext, useEffect, useCallback, useMemo } from "react";
 import { initializeApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInWithPhoneNumber, RecaptchaVerifier, initializeRecaptchaConfig } from "firebase/auth";
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, query, where, writeBatch, increment, updateDoc, onSnapshot } from "firebase/firestore";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const LANGS = [{ id:"ru", flag:"🇷🇺", label:"RU" },{ id:"ky", flag:"🇰🇬", label:"KG" }];
@@ -169,6 +170,25 @@ const CITIES = [
   { id:"vorukh",      g_ru:"Баткенская обл.",     g_ky:"Баткен облусу",       ru:"Воруx",             ky:"Ворух",             t:"city"     },
   { id:"khaydarkan", g_ru:"Баткенская обл.",     g_ky:"Баткен облусу",       ru:"Хайдаркан",         ky:"Хайдаркан",         t:"city"     },
   { id:"ak_turpak",  g_ru:"Баткенская обл.",     g_ky:"Баткен облусу",       ru:"Ак-Турпак",         ky:"Ак-Турпак",         t:"city"     },
+  { id:"moscow_obl", g_ru:"Россия", g_ky:"Орусия", ru:"Московская обл.",   ky:"Москва облусу",     t:"city" },
+  { id:"moscow",     g_ru:"Россия", g_ky:"Орусия", ru:"Москва",            ky:"Москва",            t:"city" },
+  { id:"spb",        g_ru:"Россия", g_ky:"Орусия", ru:"Санкт-Петербург",   ky:"Санкт-Петербург",   t:"city" },
+  { id:"novosibirsk",g_ru:"Россия", g_ky:"Орусия", ru:"Новосибирск",       ky:"Новосибирск",       t:"city" },
+  { id:"ekaterinburg",g_ru:"Россия", g_ky:"Орусия", ru:"Екатеринбург",     ky:"Екатеринбург",      t:"city" },
+  { id:"kazan",      g_ru:"Россия", g_ky:"Орусия", ru:"Казань",            ky:"Казань",            t:"city" },
+  { id:"krasnoyarsk",g_ru:"Россия", g_ky:"Орусия", ru:"Красноярск",        ky:"Красноярск",        t:"city" },
+  { id:"ufa",        g_ru:"Россия", g_ky:"Орусия", ru:"Уфа",               ky:"Уфа",               t:"city" },
+  { id:"krasnodar",  g_ru:"Россия", g_ky:"Орусия", ru:"Краснодар",         ky:"Краснодар",         t:"city" },
+  { id:"samara",     g_ru:"Россия", g_ky:"Орусия", ru:"Самара",            ky:"Самара",            t:"city" },
+  { id:"omsk",       g_ru:"Россия", g_ky:"Орусия", ru:"Омск",              ky:"Омск",              t:"city" },
+  { id:"volgograd",  g_ru:"Россия", g_ky:"Орусия", ru:"Волгоград",         ky:"Волгоград",         t:"city" },
+  { id:"saratov",    g_ru:"Россия", g_ky:"Орусия", ru:"Саратов",           ky:"Саратов",           t:"city" },
+  { id:"tyumen",     g_ru:"Россия", g_ky:"Орусия", ru:"Тюмень",            ky:"Тюмень",            t:"city" },
+  { id:"makhachkala",g_ru:"Россия", g_ky:"Орусия", ru:"Махачкала",         ky:"Махачкала",         t:"city" },
+  { id:"barnaul",    g_ru:"Россия", g_ky:"Орусия", ru:"Барнаул",           ky:"Барнаул",           t:"city" },
+  { id:"irkutsk",    g_ru:"Россия", g_ky:"Орусия", ru:"Иркутск",           ky:"Иркутск",           t:"city" },
+  { id:"vladivostok",g_ru:"Россия", g_ky:"Орусия", ru:"Владивосток",       ky:"Владивосток",       t:"city" },
+  { id:"sakhalin",   g_ru:"Россия", g_ky:"Орусия", ru:"Сахалин",           ky:"Сахалин",           t:"city" },
 ];
 const locName  = (loc, l) => l==="ru" ? loc.ru  : loc.ky;
 const locGroup = (loc, l) => l==="ru" ? loc.g_ru : loc.g_ky;
@@ -194,7 +214,14 @@ const CATS = [
   { id:16, ti:"ti-users-group",        light:"#e07a18", ru:"Мероприятие",    ky:"Маарeke",         color:"#E65100", bg:"#FBE9E7", shadow:"#873000" },
   { id:17, ti:"ti-cash",              light:"#3a9b40", ru:"Бухгалтерия",    ky:"Бухгалтерия",    color:"#2E7D32", bg:"#E8F5E9", shadow:"#14461a" },
   { id:18, ti:"ti-scale",             light:"#6b4a42", ru:"Юридика",        ky:"Юридика",         color:"#4E342E", bg:"#EFEBE9", shadow:"#2a1a16" },
+  { id:19, ti:"ti-briefcase",         light:"#00e052", ru:"Вакансии",       ky:"Жумуш орундары",  color:"#00C244", bg:"#E5FBEF", shadow:"#007a2a" },
+  { id:20, ti:"ti-speakerphone",      light:"#f0997b", ru:"Объявления",     ky:"Жарыялар",         color:"#D85A30", bg:"#FAECE7", shadow:"#712B13" },
 ];
+
+// Порядок вывода категорий в ленте (после кнопки "Все") — Вакансии и Объявления показываются
+// сразу вторыми и третьими, остальные категории идут как в CATS. Числовые id категорий (и их
+// индекс в CATS) не меняем — на них завязано хранение заданий (task.cat), тут только порядок отображения.
+const CATS_DISPLAY = [CATS[19], CATS[20], ...CATS.slice(0,19)];
 
 const PERIOD_OPTIONS_RU = ["На один день","На два дня","На три дня","До конца недели","До конца месяца","Другое"];
 const PERIOD_OPTIONS_KY = ["Бир күн","Эки күн","Үч күн","Жума бүтүшүнө чейин","Ай бүтүшүнө чейин","Башка"];
@@ -203,7 +230,7 @@ const T = {
   ru:{
     appName:"Иштерман", search:"Поиск заданий...", allCities:"Все населённые пункты",
     useGeo:"📡 Рядом", locating:"...", allCats:"Все",
-    sortNew:"Новые", sortCheap:"↑ Дешевле", sortExpensive:"↓ Дороже", sortNear:"📍 Ближе",
+    sortNew:"Новые", sortCheap:"↑Дешевле", sortExpensive:"↓Дороже", sortConsult:"Консул-я", sortCurrency:"💱Курс", sortServicePrices:"Уста пулу",
     urgent:"Срочно", noTasks:"Задачи не найдены",
     create:"Создать", profile:"Профиль", tasks:"Задачи",
     newTask:"Новая задача", createMore:"Создать ещё", searchLoc:"Поиск...",
@@ -225,7 +252,7 @@ const T = {
     selectExec:"✅ Выбрать исполнителя", declineExec:"Отклонить",
     completeTask:"🏁 Завершить задание", completeConfirm:"Подтвердить завершение",
     completeHint:"После завершения задание нельзя реактивировать",
-    reactivate:"🔄 Снова открыть", reactLimit:"Лимит реактиваций (3). Создайте новое задание.",
+    reactivate:"🔄 Отменить исполнителя", reactLimit:"Лимит реактиваций (3). Создайте новое задание.",
     expiresIn:"Истекает через",
     respond:"Откликнуться", respondSent:"Отклик отправлен!",
     alreadyResponded:"Вы уже откликнулись",
@@ -269,12 +296,12 @@ const T = {
     gallery:"🖼 Галерея", camera:"📷 Камера", photosUploaded:"Загружено",photosOf:"из",
     nextStep:"Далее →", respondCount:"Откликов:", noTasks_my:"У вас пока нет заданий",
     otherCustomerTask:"Это задание другого заказчика", leaveReviewHint:"Оставьте отзыв исполнителю",
-    deleteTask:"🗑 Удалить завершённое задание", deleteResponse:"🗑 Удалить из истории", cancelTask:"Отменить задание", cancelTaskWarn:"При отмене задания деньги не возвращаются", cancelledNotif:"отменил задание",
+    deleteTask:"🗑 Удалить завершённое задание", deleteResponse:"🗑 Удалить из истории", cancelTask:"Отменить задание", cancelTaskWarn:"Вы уверены, что хотите отменить задание?", cancelledNotif:"отменил задание",
   },
   ky:{
     appName:"Иштерман", search:"Тапшырмаларды издөө...", allCities:"Бардык айылдар жана шаарлар",
     useGeo:"📡 Жанымда", locating:"...", allCats:"Баары",
-    sortNew:"Жаңылар", sortCheap:"↑ Арзан", sortExpensive:"↓ Кымбат", sortNear:"📍 Жакын",
+    sortNew:"Жаңылар", sortCheap:"↑Арзан", sortExpensive:"↓Кымбат", sortConsult:"Консул-я", sortCurrency:"💱Курс", sortServicePrices:"Уста пулу",
     urgent:"Шашылыш", noTasks:"Тапшырма табылган жок",
     create:"Тапшырма", profile:"Профиль", tasks:"Тапшырмалар",
     newTask:"Жаңы тапшырма", createMore:"Дагы түзүү", searchLoc:"Издөө...",
@@ -296,7 +323,7 @@ const T = {
     selectExec:"✅ Аткаруучуну тандоо", declineExec:"Баш тартуу",
     completeTask:"🏁 Тапшырманы аяктоо", completeConfirm:"Аяктоону ырастоо",
     completeHint:"Аяктагандан кийин тапшырманы кайра ачуу мүмкүн эмес",
-    reactivate:"🔄 Кайра ачуу", reactLimit:"Реактивация чеги (3). Жаңы тапшырма түзүңүз.",
+    reactivate:"🔄 Аткаруучуну жокко чыгаруу", reactLimit:"Реактивация чеги (3). Жаңы тапшырма түзүңүз.",
     expiresIn:"Мөөнөтү:",
     respond:"Жооп берүү", respondSent:"Жооп жөнөтүлдү!",
     alreadyResponded:"Жооп бердиңиз",
@@ -340,11 +367,12 @@ const T = {
     gallery:"🖼 Галерея", camera:"📷 Камера", photosUploaded:"Жүктөлдү",photosOf:"/",
     nextStep:"Алга →", respondCount:"Жооптор:", noTasks_my:"Сизде азырынча тапшырма жок",
     otherCustomerTask:"Бул башка буйрутмачынын тапшырмасы", leaveReviewHint:"Аткаруучуга пикир калтырыңыз",
-    deleteTask:"🗑 Аяктаганды өчүрүү", deleteResponse:"🗑 Тарыхтан өчүрүү", cancelTask:"Тапшырманы жокко чыгаруу", cancelTaskWarn:"Тапшырма жокко чыгарылса акча кайтарылбайт", cancelledNotif:"тапшырманы жокко чыгарды",
+    deleteTask:"🗑 Аяктаганды өчүрүү", deleteResponse:"🗑 Тарыхтан өчүрүү", cancelTask:"Тапшырманы жокко чыгаруу", cancelTaskWarn:"Тапшырманы жокко чыгаргыңыз келеби?", cancelledNotif:"тапшырманы жокко чыгарды",
   }
 };
 
 const css = `
+.grecaptcha-badge{visibility:hidden!important;}
 .dark-mode{--color-background-primary:#1C1C1E;--color-background-secondary:#2C2C2E;--color-background-tertiary:#111113;--color-text-primary:#F2F2F7;--color-text-secondary:#8E8E93;--color-border-tertiary:#38383A;}
 input,select,textarea{color-scheme:light;}
 .dark-mode input,.dark-mode select,.dark-mode textarea{background:#2C2C2E;border-color:#38383A;color:#F2F2F7;}
@@ -354,6 +382,9 @@ input,select,textarea{color-scheme:light;}
 @keyframes tabSlide{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
 @keyframes popIn{0%{transform:scale(0.88);opacity:0}60%{transform:scale(1.04)}100%{transform:scale(1);opacity:1}}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulseArrow{0%,100%{opacity:0.4;transform:translateX(0)}50%{opacity:1;transform:translateX(3px)}}
+@keyframes consultSheen{0%,45%{transform:translateX(-120%) skewX(-20deg)}65%,100%{transform:translateX(220%) skewX(-20deg)}}
+.consult-sheen{position:absolute;top:0;left:0;width:40%;height:100%;background:linear-gradient(120deg,transparent,rgba(255,255,255,0.6),transparent);animation:consultSheen 2.6s ease-in-out infinite;pointer-events:none}
 @keyframes logoMega{
   0%{transform:translateY(-280px) rotate(-15deg) scale(0.4) rotateX(40deg);opacity:0;filter:drop-shadow(0 0 0px rgba(255,180,0,0))}
   30%{opacity:1;filter:drop-shadow(0 0 40px rgba(255,200,0,1)) drop-shadow(0 0 80px rgba(255,140,0,0.8)) drop-shadow(0 30px 20px rgba(0,0,0,0.4))}
@@ -448,6 +479,66 @@ const SK_REVIEWS   = "ishtap_reviews_db";
 const SK_SETTINGS  = "ishtap_settings";
 // Единая глобальная таблица: [{id, userId, text, read, time}]
 const SK_NOTIFS    = "ishtap_notifications_db";
+const SK_REFS      = "ishtap_refs_db";
+const SK_CLEARED_NOTIFS = "ishtap_cleared_notifs";
+const loadClearedNotifs = ():Set<string> => { try{const v=localStorage.getItem(SK_CLEARED_NOTIFS);return new Set(v?JSON.parse(v):[]);}catch{return new Set();} };
+const saveClearedNotifs = (s:Set<string>) => { try{localStorage.setItem(SK_CLEARED_NOTIFS,JSON.stringify([...s]));}catch{} };
+
+// Аватарки хранятся в отдельной коллекции avatars/{userId} (не в основном документе users) —
+// так тяжёлые base64-картинки не тянутся всем клиентам через общую подписку на users,
+// а подгружаются лениво (см. avatarCache/fbGetAvatar) только когда аватар реально показывается.
+const avatarCache:Record<string,string|null> = {};
+const fbSaveAvatar = async (userId:string, base64:string):Promise<boolean> => {
+  try { await setDoc(doc(fbDb,"avatars",userId), {data:base64}); avatarCache[userId]=base64; return true; }
+  catch(e){console.warn(e);return false;}
+};
+const fbDeleteAvatar = async (userId:string) => {
+  try { await setDoc(doc(fbDb,"avatars",userId), {data:null}); avatarCache[userId]=null; }
+  catch(e){console.warn(e);}
+};
+// Видео к заданию — в Storage (не в Firestore, документ на 1МБ видео не поместится).
+const fbUploadTaskVideo = async (userId:string, file:File):Promise<string|null> => {
+  try {
+    const path = `taskVideos/${userId}_${Date.now()}.mp4`;
+    const r = storageRef(fbStorage, path);
+    await uploadBytes(r, file, {contentType:file.type||"video/mp4"});
+    return await getDownloadURL(r);
+  } catch(e){ console.warn(e); return null; }
+};
+const fbGetAvatar = async (userId:string):Promise<string|null> => {
+  if (avatarCache[userId] !== undefined) return avatarCache[userId];
+  try { const d=await getDoc(doc(fbDb,"avatars",userId)); const data=d.exists()?(d.data() as any).data||null:null; avatarCache[userId]=data; return data; }
+  catch(e){console.warn(e);return null;}
+};
+// Фото заданий (base64) — отдельно от tasks, тем же паттерном что и аватарки:
+// не тянутся всем клиентам через общую подписку на всю коллекцию tasks в ленте,
+// подгружаются лениво только когда открыт конкретный заказ (см. taskMediaCache/fbGetTaskPhotos).
+const taskMediaCache:Record<string,string[]|undefined> = {};
+const fbSaveTaskPhotos = async (taskId:string|number, photos:string[]):Promise<boolean> => {
+  try { await setDoc(doc(fbDb,"taskMedia",String(taskId)), {photos}); taskMediaCache[String(taskId)]=photos; return true; }
+  catch(e){console.warn(e);return false;}
+};
+const fbGetTaskPhotos = async (taskId:string|number):Promise<string[]> => {
+  const key=String(taskId);
+  if (taskMediaCache[key] !== undefined) return taskMediaCache[key] as string[];
+  try { const d=await getDoc(doc(fbDb,"taskMedia",key)); const data=d.exists()?(d.data() as any).photos||[]:[]; taskMediaCache[key]=data; return data; }
+  catch(e){console.warn(e);return [];}
+};
+
+const fbAddReferral = async (inviterId:string) => {
+  try {
+    const ref=doc(fbDb,"referrals",inviterId);
+    const snap=await getDoc(ref);
+    if(snap.exists()){await updateDoc(ref,{count:increment(1)});}
+    else{await setDoc(ref,{count:1});}
+  } catch(e){console.warn(e);}
+};
+const fbGetReferralCount = async (userId:string):Promise<number> => {
+  try {
+    const snap=await getDoc(doc(fbDb,"referrals",userId));
+    return snap.exists()?(snap.data().count||0):0;
+  } catch{return 0;}
+};
 
 const loadSettings  = () => { try{const v=localStorage.getItem(SK_SETTINGS); return v?JSON.parse(v):{notificationsOn:true,darkTheme:false,myCategories:[]};}catch{return{notificationsOn:true,darkTheme:false,myCategories:[]};} };
 const saveSettings  = s  => { try{localStorage.setItem(SK_SETTINGS,JSON.stringify(s));}catch{} };
@@ -457,6 +548,15 @@ const clearUser     = () => { try{localStorage.removeItem(SK_USER);}catch{} };
 const loadUsersDB   = () => { try{const v=localStorage.getItem(SK_USERS);     return v?JSON.parse(v):{};  }catch{return{};} };
 const saveUsersDB   = db => { try{localStorage.setItem(SK_USERS,JSON.stringify(db));}catch{} };
 const loadTasksDB   = () => { try{const v=localStorage.getItem(SK_TASKS);     return v?JSON.parse(v):null;}catch{return null;} };
+// Кеш в localStorage может быть устаревшим (например, приложение не открывали больше 7 дней) —
+// в нём задания ещё числятся "open", хотя срок их размещения уже истёк. Раньше это показывалось
+// на экране сразу при открытии приложения, а через пару секунд, когда подключался живой слушатель
+// Firestore или срабатывала периодическая проверка сроков, такие задания резко пропадали из ленты —
+// эффект "моргания" списка. Применяем ту же проверку истечения СРАЗУ к кешу, до первой отрисовки.
+const withExpiryApplied = (tasks:any[]) => {
+  const now = Date.now();
+  return tasks.map(tk => tk.status==="open" && (typeof tk.expires_at==="number"?tk.expires_at:new Date(tk.expires_at).getTime())<now ? {...tk, status:"closed_expired"} : tk);
+};
 const saveTasksDB   = ts => { try{localStorage.setItem(SK_TASKS,JSON.stringify(ts));}catch{} };
 const loadRespDB    = () => { try{const v=localStorage.getItem(SK_RESPONSES); return v?JSON.parse(v):[];  }catch{return[];} };
 const saveRespDB    = rs => { try{localStorage.setItem(SK_RESPONSES,JSON.stringify(rs));}catch{} };
@@ -474,9 +574,10 @@ const firebaseConfig = {
   messagingSenderId: "290713684597",
   appId: "1:290713684597:web:5cf3ccf8e1e61fb72d063c",
 };
-const fbApp  = initializeApp(firebaseConfig);
-const fbAuth = getAuth(fbApp);
-const fbDb   = getFirestore(fbApp);
+const fbApp     = initializeApp(firebaseConfig);
+const fbAuth    = getAuth(fbApp);
+const fbDb      = getFirestore(fbApp);
+const fbStorage = getStorage(fbApp);
 
 const ADMIN_EMAIL = "mos.kg81@gmail.com";
 
@@ -487,50 +588,119 @@ const fbLoadUserProfile = async (uid:string) => {
   try { const d=await getDoc(doc(fbDb,"users",uid)); return d.exists()?d.data():null; } catch{ return null; }
 };
 
-const fbSyncTasks = (tasks:any[]) => {
+// Вход без PIN — при вводе номера ищем существующий профиль прямо в users по полю phone.
+// Ошибки сети/сервера намеренно НЕ проглатываются здесь — нужно точно отличать
+// "номера действительно нет" от "не удалось проверить", иначе сбой сети приводит
+// к тихому созданию задвоенного аккаунта на тот же номер (см. submit() в LoginScreen).
+const fbFindUserByPhone = async (phone:string):Promise<any|null> => {
+  const snap = await getDocs(query(collection(fbDb,"users"), where("phone","==",phone)));
+  return snap.empty ? null : snap.docs[0].data();
+};
+
+const fbLoadAllData = async () => {
   try {
+    const [tasksSnap,respSnap,reviewsSnap]=await Promise.all([
+      getDocs(collection(fbDb,"tasks")),
+      getDocs(collection(fbDb,"responses")),
+      getDocs(collection(fbDb,"reviews")),
+    ]);
+    return {
+      tasks:    tasksSnap.docs.map(d=>d.data()),
+      responses:respSnap.docs.map(d=>d.data()),
+      reviews:  reviewsSnap.docs.map(d=>d.data()),
+    };
+  } catch(e){console.warn(e);return null;}
+};
+
+// Раньше fbSync* при КАЖДОМ изменении (например, публикация одного задания) перезаписывали
+// ВСЮ коллекцию целиком через writeBatch — то есть одно действие пользователя превращалось
+// в N записей, где N = общее число заданий/откликов/уведомлений в базе. Это не только дорого
+// (Firestore берёт деньги за каждую операцию чтения/записи на платном Blaze-плане), но и
+// заставляло ВСЕХ подключённых через onSnapshot клиентов получать событие изменения по всем
+// N документам сразу. Теперь сравниваем предыдущий и новый массив по id и отправляем в
+// Firestore только реально изменившиеся, добавленные или удалённые документы.
+const diffChangedIds = (prev:any[], next:any[], strip:(x:any)=>any) => {
+  const prevMap = new Map(prev.map(x=>[String(x.id), JSON.stringify(strip(x))]));
+  const nextIds = new Set(next.map(x=>String(x.id)));
+  const changed = next.filter(x=>prevMap.get(String(x.id)) !== JSON.stringify(strip(x)));
+  const removedIds = prev.filter(x=>!nextIds.has(String(x.id))).map(x=>String(x.id));
+  return { changed, removedIds };
+};
+
+const fbSyncTasks = (prev:any[], next:any[]) => {
+  try {
+    // photos никогда не пишутся обратно в tasks — они живут только в taskMedia.
+    // Без этой защиты клиент со старыми данными в памяти (загруженными до переноса
+    // фото в taskMedia) может при любом изменении задания случайно восстановить
+    // старое поле photos обратно в документ и снова раздуть коллекцию tasks.
+    const strip = (t:any) => { const {photos,...rest}=t; return rest; };
+    // firestore.rules запрещает delete для tasks (allow delete: if false) — попытка
+    // удалить документ в batch.commit() атомарно откатывает ВЕСЬ пакет целиком, включая
+    // легитимные обновления других заданий. Поэтому только пишем изменённые/новые
+    // документы; "удалённые" локально задания просто перестают перезаписываться
+    // (как и раньше до этой оптимизации) — это ограничение самих правил, не баг.
+    const { changed } = diffChangedIds(prev, next, strip);
+    if (!changed.length) return;
     const b=writeBatch(fbDb);
-    tasks.forEach(t=>b.set(doc(fbDb,"tasks",String(t.id)),{...t}));
+    changed.forEach(t=>b.set(doc(fbDb,"tasks",String(t.id)), strip(t)));
     b.commit().catch(console.warn);
   } catch{}
 };
-const fbSyncResponses = (rs:any[]) => {
+const fbSyncResponses = (prev:any[], next:any[]) => {
   try {
+    // Как и для tasks — firestore.rules запрещает delete для responses, поэтому
+    // отправляем в Firestore только изменённые/новые отклики, без удаления.
+    const { changed } = diffChangedIds(prev, next, r=>r);
+    if (!changed.length) return;
     const b=writeBatch(fbDb);
-    rs.forEach(r=>b.set(doc(fbDb,"responses",String(r.id)),{...r}));
+    changed.forEach(r=>b.set(doc(fbDb,"responses",String(r.id)), {...r}));
     b.commit().catch(console.warn);
   } catch{}
 };
+// Отзывы неизменяемы (Firestore rules запрещают update) — пересылать весь список
+// при каждом добавлении нельзя, т.к. один пакет с уже существующими отзывами
+// целиком отклоняется правилами. Пишем только последний (новый) отзыв.
 const fbSyncReviews = (rv:any[]) => {
   try {
+    const last=rv[rv.length-1];
+    if(!last) return;
+    setDoc(doc(fbDb,"reviews",String(last.id)), last).catch(console.warn);
+  } catch{}
+};
+const fbSyncNotifs = (prev:any[], next:any[]) => {
+  try {
+    const { changed, removedIds } = diffChangedIds(prev, next, n=>n);
+    if (!changed.length && !removedIds.length) return;
     const b=writeBatch(fbDb);
-    rv.forEach(r=>b.set(doc(fbDb,"reviews",String(r.id)),{...r}));
+    changed.forEach(n=>b.set(doc(fbDb,"notifications",String(n.id)), {...n}));
+    removedIds.forEach(id=>b.delete(doc(fbDb,"notifications",id)));
     b.commit().catch(console.warn);
   } catch{}
 };
-const fbSyncNotifs = (ns:any[]) => {
+const fbDeleteNotifs = (ids:string[]) => {
   try {
+    if(!ids.length)return;
     const b=writeBatch(fbDb);
-    ns.slice(0,200).forEach(n=>b.set(doc(fbDb,"notifications",String(n.id)),{...n}));
+    ids.forEach(id=>b.delete(doc(fbDb,"notifications",String(id))));
     b.commit().catch(console.warn);
   } catch{}
 };
 
 const fbGetAdminStats = async () => {
   try {
-    const [users,tasks,responses,reviews] = await Promise.all([
+    const [users,tasks,responses,reviews,refs] = await Promise.all([
       getDocs(collection(fbDb,"users")),
       getDocs(collection(fbDb,"tasks")),
       getDocs(collection(fbDb,"responses")),
       getDocs(collection(fbDb,"reviews")),
+      getDocs(collection(fbDb,"referrals")),
     ]);
     const usersData  = users.docs.map(d=>d.data());
     const tasksData  = tasks.docs.map(d=>d.data());
-    const recentUsers = [...usersData]
-      .filter(u=>u.createdAt)
-      .sort((a,b)=>b.createdAt-a.createdAt)
-      .slice(0,10)
-      .map(u=>({name:u.name||"—",phone:u.phone||"—",role:u.role||"—",createdAt:u.createdAt}));
+    const todayStart=new Date();todayStart.setHours(0,0,0,0);
+    const todayTs=todayStart.getTime();
+    const todayCustomers=usersData.filter(u=>u.role==="customer"&&u.createdAt>=todayTs).length;
+    const todayExecutors=usersData.filter(u=>u.role==="executor"&&u.createdAt>=todayTs).length;
     return {
       users:          users.size,
       customers:      usersData.filter(u=>u.role==="customer").length,
@@ -542,7 +712,10 @@ const fbGetAdminStats = async () => {
       cancelledTasks: tasksData.filter(t=>t.status==="cancelled").length,
       responses:      responses.size,
       reviews:        reviews.size,
-      recentUsers,
+      todayCustomers,
+      todayExecutors,
+      totalReferrals: refs.docs.reduce((sum,d)=>sum+(d.data().count||0),0),
+      totalInviters: refs.docs.filter(d=>(d.data().count||0)>0).length,
     };
   } catch(e) { console.warn(e); return null; }
 };
@@ -594,24 +767,27 @@ const buildInitTasks = () => SEED_TASKS.map(s=>({
   completed: false,
   reactivation_count: 0,
   chosen_executor_id: null,
-  expires_at: Date.now()+7*86400000,
+  expires_at: Date.now()+14*86400000,
 }));
 
 const ensureDemoDB = () => {
   const db=loadUsersDB();
-  if (!db[DEMO_EXECUTOR.phone]) { db[DEMO_EXECUTOR.phone]=DEMO_EXECUTOR; saveUsersDB(db); }
+  if (!db[DEMO_EXECUTOR.id]) { db[DEMO_EXECUTOR.id]=DEMO_EXECUTOR; saveUsersDB(db); }
 };
 
 const Ctx = createContext({});
 const useApp = () => useContext(Ctx);
 
+// usersDB хранится по уникальному id пользователя (не по номеру телефона —
+// в базе встречаются задвоения телефонов от старых регистраций, из-за которых
+// один аккаунт мог перезаписывать другой в справочнике и терялись имена/аватарки).
 function useUserById(uid) {
   const { currentUser, usersDB } = useApp();
   if (!uid) return null;
   if (uid===currentUser?.id) return currentUser;
   if (uid===MOCK_OWNER_ID)   return MOCK_OWNER;
   if (uid===DEMO_EXEC_ID)    return DEMO_EXECUTOR;
-  return usersDB[Object.keys(usersDB).find(k=>usersDB[k].id===uid)] || { id:uid, name:uid.slice(0,8), phone:"—" };
+  return usersDB[uid] || { id:uid, name:uid.slice(0,8), phone:"—" };
 }
 function useUserName(uid)  { return useUserById(uid)?.name  || "—"; }
 function useUserPhone(uid) { return useUserById(uid)?.phone || "—"; }
@@ -679,9 +855,19 @@ function StepBar({ step, lang, t }) {
   );
 }
 function Avatar({ user, size=54, fontSize=18 }) {
-  if (user?.avatar) return (
+  const freshPreview = user?.avatar && user.avatar.startsWith("data:") ? user.avatar : null;
+  const [url,setUrl] = useState(freshPreview || (user?.id ? avatarCache[user.id] : null) || null);
+  useEffect(()=>{
+    if (freshPreview) { setUrl(freshPreview); return; }
+    if (!user?.id || !user.hasAvatar) { setUrl(null); return; }
+    if (avatarCache[user.id] !== undefined) { setUrl(avatarCache[user.id]); return; }
+    let cancelled=false;
+    fbGetAvatar(user.id).then(d=>{ if(!cancelled) setUrl(d); });
+    return ()=>{cancelled=true;};
+  },[user?.id, user?.hasAvatar, freshPreview]);
+  if (url) return (
     <div style={{width:size,height:size,borderRadius:size/2,overflow:"hidden",flexShrink:0,border:"2px solid var(--color-border-tertiary,#e0e0e0)"}}>
-      <img src={user.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+      <img src={url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
     </div>
   );
   return (
@@ -693,8 +879,8 @@ function Avatar({ user, size=54, fontSize=18 }) {
 function ReviewBtn({ taskId, targetId, taskTitle, reviews, currentUser, push, t }) {
   const existing=reviews.find(r=>r.taskId===taskId&&r.authorId===currentUser.id&&r.targetId===targetId);
   return (
-    <button className="rb" onClick={()=>push({type:"leaveReview",taskId,targetId,taskTitle})}
-      style={{width:"100%",padding:"10px",borderRadius:10,border:existing?"0.5px solid var(--color-border-tertiary,#e0e0e0)":"none",cursor:"pointer",background:existing?"var(--color-background-secondary,#f4f4f4)":"#185FA5",color:existing?"var(--color-text-secondary,#888)":"#fff",fontSize:13,fontWeight:600,marginTop:8,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+    <button className="rb" disabled={!!existing} onClick={existing?undefined:()=>push({type:"leaveReview",taskId,targetId,taskTitle})}
+      style={{width:"100%",padding:"10px",borderRadius:10,border:existing?"0.5px solid var(--color-border-tertiary,#e0e0e0)":"none",cursor:existing?"default":"pointer",pointerEvents:existing?"none":"auto",background:existing?"var(--color-background-secondary,#f4f4f4)":"#185FA5",color:existing?"var(--color-text-secondary,#888)":"#fff",fontSize:13,fontWeight:600,marginTop:8,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
       {existing?<><Stars r={existing.rating} size={13}/> {t.alreadyReviewed}</>:<>⭐ {t.leaveReview}</>}
     </button>
   );
@@ -711,7 +897,8 @@ function LangScreen({ onSelect }) {
         <span style={{fontSize:18,fontWeight:700,color:"#F57C00"}}>Иштерман</span>
       </div>
       <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 28px"}}>
-        <p style={{margin:"0 0 6px",fontSize:18,fontWeight:700,color:"var(--color-text-primary,#111)",textAlign:"center"}}>Выберите язык</p>
+        <img src="/новая иконка Профиль.png" alt="" style={{width:90,height:90,objectFit:"contain",marginBottom:16}}/>
+<p style={{margin:"0 0 6px",fontSize:18,fontWeight:700,color:"var(--color-text-primary,#111)",textAlign:"center"}}>Выберите язык</p>
         <p style={{margin:"0 0 28px",fontSize:14,color:"var(--color-text-secondary,#888)",textAlign:"center"}}>Тилди тандаңыз</p>
         <div style={{display:"flex",flexDirection:"column",gap:12,width:"100%",maxWidth:320}}>
           {[{id:"ru",flag:"🇷🇺",label:"Русский"},{id:"ky",flag:"🇰🇬",label:"Кыргызча"}].map(l=>(
@@ -732,18 +919,19 @@ function LangScreen({ onSelect }) {
   );
 }
 
+const LOGIN_COUNTRIES = [
+  { code:"996", flagUrl:"https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/1x1/kg.svg", digits:9,  mask:[3,3,3] },
+  { code:"7",   flagUrl:"https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/1x1/ru.svg", digits:10, mask:[3,3,2,2] },
+];
+
 function LoginScreen({ lang, setLang, onLogin }) {
   const t=T[lang];
-  const [step,setStep]   = useState<"phone"|"otp"|"name">("phone");
-  const [phone,setPhone] = useState("+996 ");
-  const [otp,setOtp]     = useState("");
+  const [country,setCountry] = useState(LOGIN_COUNTRIES[0]);
+  const [countryPickerOpen,setCountryPickerOpen] = useState(false);
+  const [localDigits,setLocalDigits] = useState("");
   const [name,setName]   = useState("");
   const [err,setErr]     = useState("");
   const [loading,setLoading] = useState(false);
-  const [agreed,setAgreed]   = useState(false);
-  const [showDocsInline,setShowDocsInline] = useState<"terms"|"privacy"|null>(null);
-  const confirmRef = useRef<any>(null);
-  const verifierRef = useRef<any>(null);
 
   useEffect(()=>{
     let ctx=null;
@@ -775,113 +963,58 @@ function LoginScreen({ lang, setLang, onLogin }) {
   },[]);
 
 
-  const fmtPhone=(v)=>{
-    let d=v.replace(/\D/g,"");
-    if(d.startsWith("996"))d=d.slice(3);
-    d=d.slice(0,9);
-    let s="+996 ";
-    if(d.length>0)s+=d.slice(0,3);
-    if(d.length>3)s+=" "+d.slice(3,6);
-    if(d.length>6)s+=" "+d.slice(6,9);
-    return s;
-  };
+  const displayDigits = (() => {
+    let out="", i=0;
+    for(const len of country.mask){ if(i>=localDigits.length) break; out += (out?" ":"") + localDigits.slice(i,i+len); i+=len; }
+    return out;
+  })();
 
-  const sendOtp=async()=>{
-    const p=phone.replace(/\s/g,"");
-    if(!/^\+996\d{9}$/.test(p)){setErr(t.errPhoneFormat);return;}
-    setLoading(true);setErr("");
-    console.log("[SMS] Отправка кода на",p);
-    try{
-      try{verifierRef.current?.clear();}catch{}
-      verifierRef.current=null;
-      const containerId="recaptcha-"+Date.now();
-      const container=document.createElement("div");
-      container.id=containerId;
-      document.body.appendChild(container);
-      verifierRef.current=new RecaptchaVerifier(fbAuth,container,{size:"invisible"});
-      const result=await signInWithPhoneNumber(fbAuth,p,verifierRef.current);
-      confirmRef.current=result;
-      console.log("[SMS] Код отправлен успешно");
-      setStep("otp");
-    }catch(e:any){
-      console.error("[SMS] Ошибка:",e.code, e.message);
-      try{verifierRef.current?.clear();}catch{}
-      verifierRef.current=null;
-      let msg="";
-      if(e.code==="auth/too-many-requests"){
-        msg=lang==="ru"?"Превышен лимит попыток. Попробуйте через 24 часа.":"Аракет саны ашып кетти. 24 сааттан кийин аракет кылыңыз.";
-      } else if(e.code==="auth/error-code:-39"||e.message?.includes("503")||e.message?.includes("error-code:-39")){
-        msg=lang==="ru"?"Сервис временно недоступен. Попробуйте позже или войдите по email.":"Кызмат убактылуу жеткиликсиз. Кийинчерээк же email аркылуу кириңиз.";
-      } else {
-        msg=lang==="ru"?"Не удалось отправить SMS. Попробуйте позже.":"SMS жөнөтүлгөн жок. Кийинчерээк аракет кылыңыз.";
-      }
-      setErr(msg);
-    }
-    setLoading(false);
-  };
-
-  const verifyOtp=async()=>{
-    if(otp.replace(/\s/g,"").length<6){setErr(lang==="ru"?"Введите 6-значный код из SMS":"SMS-тен 6 орундуу код киргизиңиз");return;}
-    setLoading(true);setErr("");
-    try{
-      await confirmRef.current.confirm(otp.replace(/\s/g,""));
-      const p=phone.replace(/\s/g,"");
-      const db=loadUsersDB();
-      const existing=db[p];
-      if(existing){onLogin(existing);}
-      else{setStep("name");}
-    }catch(e:any){
-      setErr(lang==="ru"?"Неверный код. Проверьте SMS и попробуйте снова.":"Код туура эмес. SMS текшерип, кайра аракет кылыңыз.");
-    }
-    setLoading(false);
-  };
-
-  const register=()=>{
+  const submit=async()=>{
+    const p=`+${country.code}${localDigits}`;
+    if(localDigits.length!==country.digits){setErr(t.errPhoneFormat);return;}
     if(!name.trim()){setErr(lang==="ru"?"Введите ваше имя":"Атыңызды жазыңыз");return;}
-    if(!agreed){setErr(lang==="ru"?"Примите условия соглашения для продолжения":"Улантуу үчүн келишимдин шарттарын кабыл алыңыз");return;}
-    const p=phone.replace(/\s/g,"");
-    const user={id:"u_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),phone:p,name:name.trim(),role:null};
-    const db=loadUsersDB();db[p]=user;saveUsersDB(db);saveUser(user);
+    setErr("");setLoading(true);
+    let existing:any = null;
+    let checkFailed = false;
+    try{
+      existing = await fbFindUserByPhone(p);
+    }catch(e){
+      console.warn(e);
+      checkFailed = true;
+    }
+    if(!existing){
+      // Офлайн-фоллбэк на локальный кэш, если нет сети (db теперь ключуется по id, ищем по полю phone)
+      const db=loadUsersDB();
+      existing = Object.values(db).find((u:any)=>u.phone===p) || null;
+    }
+    setLoading(false);
+    if(existing){
+      // Номер уже зарегистрирован — имя должно совпадать с тем, что указано в аккаунте.
+      // Иначе кто угодно, зная чужой номер, мог бы войти под любым именем.
+      // Само правильное имя в сообщении не показываем — иначе подбором можно было бы его узнать.
+      if((existing.name||"").trim().toLowerCase()!==name.trim().toLowerCase()){
+        setErr(lang==="ru"?"Номер уже зарегистрирован на другое имя. Проверьте, что вводите имя, указанное при регистрации.":"Номер башка атка катталган. Каттоодо көрсөтүлгөн атты туура жазганыңызды текшериңиз.");
+        return;
+      }
+      onLogin(existing);return;
+    }
+    if(checkFailed){
+      // Не удалось точно проверить, есть ли уже аккаунт с этим номером — не создаём новый
+      // "на всякий случай", это приводило к задвоению аккаунтов на слабом интернете.
+      setErr(lang==="ru"?"Не удалось проверить номер телефона. Проверьте интернет и попробуйте ещё раз.":"Телефон номерин текшерүү мүмкүн болгон жок. Интернетти текшерип, кайра аракет кылыңыз.");
+      return;
+    }
+    const user={id:"u_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),phone:p,name:name.trim(),role:null,createdAt:Date.now()};
+    const db=loadUsersDB();db[user.id]=user;saveUsersDB(db);saveUser(user);
+    fbSaveUser(user.id,user);
+    const refParam=new URLSearchParams(window.location.search).get("ref");
+    // Засчитываем реферала только если ID похож на настоящий и такой пользователь реально существует —
+    // защита от накрутки счётчика подделкой ссылки с произвольным текстом
+    if(refParam&&refParam!==user.id&&/^u_\d+_[a-z0-9]{4}$/.test(refParam)){
+      fbLoadUserProfile(refParam).then(inviter=>{ if(inviter) fbAddReferral(refParam); });
+    }
     onLogin(user);
   };
-
-  const DocsBlock=()=>(
-    <>
-      {showDocsInline&&(
-        <div style={{marginBottom:12,border:"0.5px solid #cce0f5",borderRadius:10,overflow:"hidden"}}>
-          <div style={{display:"flex",borderBottom:"0.5px solid #cce0f5",background:"#f0f7ff"}}>
-            {(["terms","privacy"] as const).map(id=>(
-              <button key={id} onClick={()=>setShowDocsInline(id)} style={{flex:1,padding:"8px 4px",border:"none",background:"none",cursor:"pointer",fontSize:11,fontWeight:showDocsInline===id?700:400,color:showDocsInline===id?"#185FA5":"#888",borderBottom:showDocsInline===id?"2px solid #185FA5":"2px solid transparent"}}>
-                {id==="terms"?(lang==="ru"?"Соглашение":"Келишим"):(lang==="ru"?"Конфиденциальность":"Купуялык")}
-              </button>
-            ))}
-            <button onClick={()=>setShowDocsInline(null)} style={{padding:"8px 10px",border:"none",background:"none",cursor:"pointer",fontSize:14,color:"#888"}}>✕</button>
-          </div>
-          <div style={{maxHeight:160,overflowY:"auto",padding:"10px 12px"}}>
-            <pre style={{margin:0,fontSize:10,lineHeight:1.6,color:"#333",whiteSpace:"pre-wrap",fontFamily:"inherit"}}>
-              {showDocsInline==="terms"
-                ?(lang==="ru"?"ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ\nИштерман — платформа для Кыргызской Республики\nДата: с момента публикации\n\n1. Регистрируясь, вы принимаете условия Соглашения.\n2. Платформа является информационным посредником.\n3. Заказчики самостоятельно публикуют задания.\n4. Исполнители самостоятельно откликаются на задания.\n5. Оплата производится напрямую между сторонами.\n6. Запрещается размещать незаконный контент.\n7. Платформа не несёт ответственности за споры.\n\nПолный текст доступен в разделе Профиль → Документы."
-                  :"КОЛДОНУУЧУ КЕЛИШИМИ\nИштерман — Кыргыз Республикасы үчүн платформа\nДата: жарыяланган күндөн баштап\n\n1. Катталуу менен сиз Келишимдин шарттарын кабыл аласыз.\n2. Платформа маалымат ортомчусу болуп саналат.\n3. Буйрутмачылар тапшырмаларды өз алдынча жайгаштырат.\n4. Аткаруучулар тапшырмаларга өз алдынча жооп беришет.\n5. Төлөм тараптардын ортосунда түздөн-түз жүргүзүлөт.\n6. Мыйзамсыз мазмун жайгаштыруу тыйылат.\n7. Платформа талаш-тартыштар үчүн жооп бербейт.\n\nТолук текст Профиль → Документтер бөлүмүндө жеткиликтүү.")
-                :(lang==="ru"?"ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ\nИштерман\nДата: с момента публикации\n\nМы собираем: имя, телефон, фото профиля (по желанию).\nДанные хранятся локально на вашем устройстве.\nМы не передаём данные третьим лицам в коммерческих целях.\nВы вправе запросить удаление своих данных.\n\nПолный текст доступен в разделе Профиль → Документы."
-                  :"КУПУЯЛЫК САЯСАТЫ\nИштерман\nДата: жарыяланган күндөн баштап\n\nБиз чогулттабыз: аты-жөн, телефон, профиль сүрөтү (каалоо боюнча).\nМаалыматтар жергиликтүү түзмөгүңүздө сакталат.\nМаалыматтарды коммерциялык максаттар үчүн үчүнчү жактарга бербейз.\nМаалыматтарыңызды жок кылып берүүнү суроого укугуңуз бар.\n\nТолук текст Профиль → Документтер бөлүмүндө жеткиликтүү.")
-              }
-            </pre>
-          </div>
-        </div>
-      )}
-      <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:14,padding:"10px 12px",background:"#f0f7ff",borderRadius:10,border:"0.5px solid #cce0f5"}}>
-        <div onClick={()=>setAgreed(a=>!a)} style={{width:20,height:20,borderRadius:5,border:`2px solid ${agreed?"#00C244":"#aaa"}`,background:agreed?"#00C244":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginTop:1}}>
-          {agreed&&<span style={{color:"#fff",fontSize:13,fontWeight:700,lineHeight:1}}>✓</span>}
-        </div>
-        <p style={{margin:0,fontSize:11,color:"#444",lineHeight:1.5}}>
-          {lang==="ru"
-            ?<>Я ознакомился и принимаю <span onClick={()=>setShowDocsInline("terms")} style={{color:"#185FA5",textDecoration:"underline",cursor:"pointer"}}>Пользовательское соглашение</span> и <span onClick={()=>setShowDocsInline("privacy")} style={{color:"#185FA5",textDecoration:"underline",cursor:"pointer"}}>Политику конфиденциальности</span> сервиса Иштерман</>
-            :<>Мен <span onClick={()=>setShowDocsInline("terms")} style={{color:"#185FA5",textDecoration:"underline",cursor:"pointer"}}>Колдонуучу келишими</span> жана <span onClick={()=>setShowDocsInline("privacy")} style={{color:"#185FA5",textDecoration:"underline",cursor:"pointer"}}>Купуялык саясаты</span> менен таанышып, кабыл алдым</>
-          }
-        </p>
-      </div>
-    </>
-  );
 
   return (
     <div className="fi" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
@@ -889,69 +1022,47 @@ function LoginScreen({ lang, setLang, onLogin }) {
         <img src="/новый логотип на кыргызском.png" alt="logo" style={{width:28,height:28,borderRadius:"50%",objectFit:"cover"}}/>
         <span style={{fontSize:18,fontWeight:700,color:"#F57C00"}}>Иштерман</span>
       </div>
-      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 28px"}}>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 28px",overflowY:"auto"}}>
         <div className="logo-anim-wrap" style={{marginBottom:20}}>
           <img src="/новый логотип на кыргызском.png" alt="Иштерман" className="logo-anim" style={{width:220,height:220,objectFit:"contain",borderRadius:"50%",display:"block"}}/>
         </div>
-        <p style={{margin:"0 0 6px",fontSize:18,fontWeight:700,color:"var(--color-text-primary,#111)",textAlign:"center"}}>{t.loginTitle}</p>
+        <p style={{margin:"0 0 6px",fontSize:18,fontWeight:700,color:"var(--color-text-primary,#111)",textAlign:"center"}}>{lang==="ru"?"Вход":"Кирүү"}</p>
         <p style={{margin:"0 0 28px",fontSize:13,color:"var(--color-text-secondary,#888)",textAlign:"center"}}>Иштерман</p>
         <div style={{width:"100%",maxWidth:320}}>
 
-          {/* Шаг 1: ввод номера */}
-          {step==="phone"&&(<>
-            <div style={{marginBottom:16}}>
-              <p style={{margin:"0 0 5px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>📞 {t.phoneLabel}</p>
-              <input type="tel" value={phone} onChange={e=>{setPhone(fmtPhone(e.target.value));setErr("");}}
-                placeholder="+996 700 000 000" style={{width:"100%",fontSize:15}}/>
+          <div style={{marginBottom:12,position:"relative"}}>
+            <p style={{margin:"0 0 5px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>📞 {t.phoneLabel}</p>
+            <div style={{display:"flex",alignItems:"stretch",border:"1px solid var(--color-border-tertiary,#ccc)",borderRadius:10,overflow:"hidden",background:"var(--color-background-primary,#fff)"}}>
+              <button type="button" onClick={()=>setCountryPickerOpen(v=>!v)}
+                style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,padding:"0 10px",border:"none",borderRight:"1px solid var(--color-border-tertiary,#ccc)",background:"var(--color-background-secondary,#f4f4f4)",cursor:"pointer"}}>
+                <img src={country.flagUrl} alt="" style={{width:22,height:22,borderRadius:"50%",objectFit:"cover",display:"block",boxShadow:"0 0 0 1px rgba(0,0,0,0.1)"}}/>
+                <span style={{fontSize:15,fontWeight:600,color:"var(--color-text-primary,#111)"}}>+{country.code}</span>
+                <span style={{fontSize:10,color:"var(--color-text-secondary,#888)"}}>▼</span>
+              </button>
+              <input type="tel" value={displayDigits} onChange={e=>{setLocalDigits(e.target.value.replace(/\D/g,"").slice(0,country.digits));setErr("");}}
+                placeholder={country.code==="996"?"700 000 000":"900 000 00 00"} style={{flex:1,minWidth:0,fontSize:15,border:"none",borderRadius:0}}/>
             </div>
-            {err&&<p style={{margin:"0 0 12px",fontSize:12,color:"#A32D2D",fontWeight:500,textAlign:"center"}}>{err}</p>}
-            <button className="nb btn3d" onClick={sendOtp} disabled={loading}
-              style={{width:"100%",padding:"13px 0",borderRadius:12,background:"linear-gradient(145deg,#00e052,#00C244)",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 5px 0 #007a2a,0 8px 16px rgba(0,194,68,0.35)",opacity:loading?0.7:1}}>
-              {loading?(lang==="ru"?"Отправка...":"Жөнөтүлүүдө..."):(lang==="ru"?"Получить SMS-код":"SMS-код алуу")}
-            </button>
-          </>)}
-
-          {/* Шаг 2: ввод OTP */}
-          {step==="otp"&&(<>
-            <div style={{marginBottom:8,padding:"10px 14px",background:"#f0f7ff",borderRadius:10,border:"0.5px solid #cce0f5"}}>
-              <p style={{margin:0,fontSize:12,color:"#444",textAlign:"center"}}>
-                {lang==="ru"?<>SMS-код отправлен на <b>{phone}</b></>:<><b>{phone}</b> номерине SMS-код жөнөтүлдү</>}
-              </p>
-            </div>
-            <div style={{marginBottom:16,marginTop:12}}>
-              <p style={{margin:"0 0 5px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>🔑 {lang==="ru"?"Код из SMS":"SMS-тен код"}</p>
-              <input type="number" value={otp} onChange={e=>{setOtp(e.target.value.slice(0,6));setErr("");}}
-                placeholder="000000" style={{width:"100%",fontSize:22,letterSpacing:8,textAlign:"center"}}/>
-            </div>
-            {err&&<p style={{margin:"0 0 12px",fontSize:12,color:"#A32D2D",fontWeight:500,textAlign:"center"}}>{err}</p>}
-            <button className="nb btn3d" onClick={verifyOtp} disabled={loading}
-              style={{width:"100%",padding:"13px 0",borderRadius:12,background:"linear-gradient(145deg,#00e052,#00C244)",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 5px 0 #007a2a,0 8px 16px rgba(0,194,68,0.35)",opacity:loading?0.7:1}}>
-              {loading?(lang==="ru"?"Проверка...":"Текшерилүүдө..."):(lang==="ru"?"Подтвердить":"Ырастоо")}
-            </button>
-            <button onClick={()=>{setStep("phone");setOtp("");setErr("");try{verifierRef.current?.clear();}catch{};try{verifierRef.current?._container?.remove();}catch{};verifierRef.current=null;}}
-              style={{width:"100%",marginTop:10,padding:"8px 0",background:"none",border:"none",cursor:"pointer",fontSize:13,color:"var(--color-text-secondary,#888)"}}>
-              ← {lang==="ru"?"Изменить номер":"Номерди өзгөртүү"}
-            </button>
-          </>)}
-
-          {/* Шаг 3: имя (только новые пользователи) */}
-          {step==="name"&&(<>
-            <div style={{marginBottom:12,padding:"10px 14px",background:"#E8F5E9",borderRadius:10,border:"0.5px solid #8AC88A"}}>
-              <p style={{margin:0,fontSize:13,color:"#2A5E1A",textAlign:"center",fontWeight:600}}>
-                ✅ {lang==="ru"?"Номер подтверждён!":"Номер ырасталды!"}
-              </p>
-            </div>
-            <div style={{marginBottom:12,marginTop:12}}>
-              <p style={{margin:"0 0 5px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>👤 {lang==="ru"?"Ваше имя":"Атыңыз"}</p>
-              <input value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder={lang==="ru"?"Имя":"Аты"} style={{width:"100%",fontSize:15}}/>
-            </div>
-            <DocsBlock/>
-            {err&&<p style={{margin:"0 0 12px",fontSize:12,color:"#A32D2D",fontWeight:500,textAlign:"center"}}>{err}</p>}
-            <button className="nb btn3d" onClick={register}
-              style={{width:"100%",padding:"13px 0",borderRadius:12,background:"linear-gradient(145deg,#00e052,#00C244)",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 5px 0 #007a2a,0 8px 16px rgba(0,194,68,0.35)"}}>
-              {lang==="ru"?"Завершить регистрацию":"Каттоону аяктоо"}
-            </button>
-          </>)}
+            {countryPickerOpen&&(
+              <div style={{position:"absolute",top:"100%",left:0,marginTop:4,background:"var(--color-background-primary,#fff)",border:"0.5px solid var(--color-border-tertiary,#ccc)",borderRadius:10,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",zIndex:10,overflow:"hidden",minWidth:140}}>
+                {LOGIN_COUNTRIES.map(c=>(
+                  <button key={c.code} type="button" onClick={()=>{setCountry(c);setLocalDigits("");setErr("");setCountryPickerOpen(false);}}
+                    style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",border:"none",background:country.code===c.code?"#E6F1FB":"transparent",cursor:"pointer",fontSize:14,fontWeight:600,color:"var(--color-text-primary,#111)"}}>
+                    <img src={c.flagUrl} alt="" style={{width:20,height:20,borderRadius:"50%",objectFit:"cover",display:"block",boxShadow:"0 0 0 1px rgba(0,0,0,0.1)"}}/>
+                    +{c.code}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{marginBottom:12}}>
+            <p style={{margin:"0 0 5px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>👤 {lang==="ru"?"Ваше имя":"Атыңыз"}</p>
+            <input value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder={lang==="ru"?"Имя":"Аты"} style={{width:"100%",fontSize:15}}/>
+          </div>
+          {err&&<p style={{margin:"0 0 12px",fontSize:12,color:"#A32D2D",fontWeight:500,textAlign:"center"}}>{err}</p>}
+          <button className="nb btn3d" onClick={submit} disabled={loading}
+            style={{width:"100%",padding:"13px 0",borderRadius:12,background:"linear-gradient(145deg,#00e052,#00C244)",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 5px 0 #007a2a,0 8px 16px rgba(0,194,68,0.35)",opacity:loading?0.7:1}}>
+            {loading?"...":(lang==="ru"?"Далее":"Алга")}
+          </button>
 
         </div>
       </div>
@@ -1257,7 +1368,15 @@ function ResponderCard({ resp, taskStatus, onSelect, onDecline, showPhone }) {
         <div style={{flex:1,minWidth:0}}>
           <button onClick={()=>push({type:"userProfile",userId:resp.executorId})} style={{background:"none",border:"none",padding:0,cursor:"pointer",fontSize:isChosen?18:16,fontWeight:700,color:"var(--color-text-primary,#111)",textDecoration:"underline",textDecorationColor:"#185FA520"}}>{user?.name||"—"}</button>
           {rating?(<div style={{display:"flex",alignItems:"center",gap:4,marginTop:3}}><Stars r={rating.avg} size={isChosen?15:13}/><span style={{fontSize:isChosen?13:12,color:"var(--color-text-secondary,#888)"}}>{rating.avg} ({rating.count})</span></div>):<span style={{fontSize:isChosen?13:12,color:"var(--color-text-secondary,#888)",display:"block",marginTop:3}}>{t.noReviews}</span>}
-          {showPhone&&isChosen&&<p style={{margin:"5px 0 0",fontSize:14,color:"#185FA5",fontWeight:500}}>📞 {phone}</p>}
+          {showPhone&&isChosen&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:5,flexWrap:"wrap"}}>
+              <p style={{margin:0,fontSize:14,color:"#185FA5",fontWeight:500}}>📞 {phone}</p>
+              {phone&&<a href={`https://wa.me/${phone.replace(/\D/g,"")}`} target="_blank" rel="noreferrer"
+                style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:"50%",background:"#25D366",color:"#fff",textDecoration:"none",flexShrink:0}}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.121 1.532 5.855L.057 23.926a.5.5 0 00.598.665l6.333-1.658A11.944 11.944 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22a9.944 9.944 0 01-5.072-1.38l-.361-.215-3.762.985.999-3.67-.237-.38A9.944 9.944 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+              </a>}
+            </div>
+          )}
         </div>
         <span style={{fontSize:isChosen?17:16,fontWeight:700,color:"#185FA5",whiteSpace:"nowrap"}}>{resp.priceOffer.toLocaleString()} сом</span>
       </div>
@@ -1289,6 +1408,20 @@ function Lightbox({ imgs, startIndex, onClose }) {
   );
 }
 
+// Фото задания подгружаются лениво из отдельной коллекции taskMedia — старые задания,
+// у которых photos ещё лежат прямо в документе (до этого разделения), продолжают работать как есть.
+function useTaskPhotos(task) {
+  const [photos,setPhotos] = useState(()=>task.photos||null);
+  useEffect(()=>{
+    if(task.photos){setPhotos(task.photos);return;}
+    if(!task.hasPhotos){setPhotos([]);return;}
+    let alive=true;
+    fbGetTaskPhotos(task.id).then(p=>{if(alive)setPhotos(p);});
+    return ()=>{alive=false;};
+  },[task.id,task.photos,task.hasPhotos]);
+  return photos||[];
+}
+
 function TaskDetailScreen({ task }) {
   const { lang, t, tasks, setTasks, addNotification, push, currentUser, responses, setResponses, reviews } = useApp();
   const [showForm,setShowForm]=useState(false);
@@ -1296,6 +1429,11 @@ function TaskDetailScreen({ task }) {
   const [comment,setComment]=useState("");
   const [lightbox,setLightbox]=useState(null);
   const [showCompleteConfirm,setShowCompleteConfirm]=useState(false);
+  const [refCount,setRefCount]=useState(0);
+  const taskPhotos=useTaskPhotos(task);
+  useEffect(()=>{
+    if(currentUser.role==="executor"){fbGetReferralCount(currentUser.id).then(setRefCount);}
+  },[currentUser.id,currentUser.role]);
 
   const cat         = CATS[task.cat];
   const loc         = CITIES.find(c=>c.id===task.city);
@@ -1313,7 +1451,8 @@ function TaskDetailScreen({ task }) {
 
   const todayStart=new Date();todayStart.setHours(0,0,0,0);
   const todayResponses=responses.filter(r=>r.executorId===currentUser.id&&new Date(r.createdAt).getTime()>=todayStart.getTime());
-  const dailyLimitReached=isExecutor&&todayResponses.length>=3;
+  const dailyFreeLimit=1+refCount; // 1 бесплатный + по 1 за каждого приглашённого друга
+  const dailyLimitReached=isExecutor&&todayResponses.length>=dailyFreeLimit;
 
   const statusMap={
     open:            {color:"#0F6E56",bg:"#E1F5EE",label:t.statusOpen},
@@ -1355,6 +1494,8 @@ function TaskDetailScreen({ task }) {
     }
     setTasks(ts=>ts.map(tk=>tk.id===task.id?{...tk,status:"completed",completed:true,completed_at:Date.now()}:tk));
     addNotification(currentUser.id, lang==="ru"?`🏁 Задание «${taskTitle}» завершено! Оставьте отзыв исполнителю.`:`🏁 «${taskTitle}» аяктады! Аткаруучуга пикир калтырыңыз.`);
+    const chosenExec=taskResponses.find(r=>r.status==="chosen");
+    if(chosenExec){addNotification(chosenExec.executorId, lang==="ru"?`🏁 Заказчик завершил задание «${taskTitle}»! Оставьте отзыв.`:`🏁 Буйрутмачы «${taskTitle}» тапшырмасын аяктатты! Пикир калтырыңыз.`);}
     setShowCompleteConfirm(false);
   };
 
@@ -1363,7 +1504,7 @@ function TaskDetailScreen({ task }) {
     setResponses(rs=>[...rs,nr]);
     addNotification(currentUser.id, t.respondSent);
     if (currentTask.ownerId!==currentUser.id) {
-      addNotification(currentTask.ownerId, lang==="ru"?`💬 Новый отклик на «${taskTitle}» от ${currentUser.name}`:`💬 «${taskTitle}» тапшырмасына ${currentUser.name} жооп берди`);
+      addNotification(currentTask.ownerId, lang==="ru"?`💬 Новый отклик на «${taskTitle}» от ${currentUser.name}`:`💬 «${taskTitle}» тапшырмасына ${currentUser.name} жооп берди`, {taskId:currentTask.id});
     }
     setShowForm(false);
   };
@@ -1388,13 +1529,16 @@ function TaskDetailScreen({ task }) {
               </div>
             ))}
           </div>
-          {(()=>{const imgs=(task.photos||[]).filter(p=>p&&(typeof p==="string"?p:p.url)&&(typeof p==="string"?p:p.url).length>10).map(p=>typeof p==="string"?p:p.url);return imgs.length>0&&(
+          {(()=>{const imgs=(taskPhotos||[]).filter(p=>p&&(typeof p==="string"?p:p.url)&&(typeof p==="string"?p:p.url).length>10).map(p=>typeof p==="string"?p:p.url);return imgs.length>0&&(
             <div style={{marginTop:12,display:"flex",gap:8,overflowX:"auto"}}>
               {imgs.map((src,i)=>(
                 <img key={i} onClick={()=>setLightbox({imgs,idx:i})} src={src} alt="" style={{width:imgs.length===1?"100%":80,height:imgs.length===1?140:80,objectFit:"cover",borderRadius:8,flexShrink:0,border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",cursor:"pointer"}}/>
               ))}
             </div>
           );})()}
+          {task.video&&(
+            <video src={task.video} controls style={{marginTop:12,width:"100%",maxHeight:260,borderRadius:8,border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",display:"block"}}/>
+          )}
         </SectionCard>
 
         {isOwner&&(
@@ -1429,16 +1573,29 @@ function TaskDetailScreen({ task }) {
         {isExecutor&&!isOwner&&currentTask.status==="open"&&(
           <SectionCard delay={0.05}>
             {!myResponse&&dailyLimitReached&&(
-              <div style={{background:"#FFF3E0",border:"1px solid #FFB74D",borderRadius:12,padding:"14px 16px",textAlign:"center"}}>
+              <div style={{background:"#FFF3E0",border:"1px solid #FFB74D",borderRadius:12,padding:"16px",textAlign:"center"}}>
                 <div style={{fontSize:28,marginBottom:6}}>🚫</div>
-                <p style={{margin:"0 0 4px",fontSize:13,fontWeight:600,color:"#E65100"}}>{lang==="ru"?"Отклики ограничены":"Жооп берүү чектелген"}</p>
-                <p style={{margin:0,fontSize:12,color:"#BF360C"}}>{lang==="ru"?"В день можно отправить только 3 отклика":"Күнүнө үч жолу гана жооп берүү мүмкүн"}</p>
+                <p style={{margin:"0 0 6px",fontSize:13,fontWeight:700,color:"#E65100"}}>
+                  {lang==="ru"?"Бесплатный отклик на сегодня использован":"Бүгүнкү бекер жооп колдонулду"}
+                </p>
+                <p style={{margin:"0 0 14px",fontSize:12,color:"#BF360C",lineHeight:1.5}}>
+                  {lang==="ru"
+                    ?"Пригласи друга зарегистрироваться по твоей ссылке — и получишь ещё один бесплатный отклик сегодня!"
+                    :"Досуңду шилтемең аркылуу катталууга чакыр — бүгүн дагы бир бекер жооп аласың!"}
+                </p>
+                <button onClick={()=>{
+                  const link=`${window.location.origin}?ref=${currentUser.id}`;
+                  if(navigator.share){navigator.share({title:"Иштерман",text:lang==="ru"?"Присоединяйся к Иштерман — платформе заданий Кыргызстана!":"Иштерманга кош — Кыргызстандын тапшырмалар платформасы!",url:link});}
+                  else{navigator.clipboard.writeText(link).then(()=>alert(lang==="ru"?"Ссылка скопирована!":"Шилтеме көчүрүлдү!"));}
+                }} style={{width:"100%",padding:"11px 0",borderRadius:10,background:"linear-gradient(145deg,#FF8C00,#E65100)",color:"#fff",border:"none",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 12px rgba(230,81,0,0.35)"}}>
+                  🔗 {lang==="ru"?"Пригласить друга":"Досту чакыруу"}
+                </button>
               </div>
             )}
             {!myResponse&&!dailyLimitReached&&(showForm?(
               <div>
                 <p style={{margin:"0 0 6px",fontSize:14,color:"var(--color-text-secondary,#888)"}}>{t.priceOffer}</p>
-                <input type="number" value={priceOffer} onChange={e=>setPriceOffer(e.target.value)} style={{width:"100%",marginBottom:12}}/>
+                <input type="number" value={priceOffer} onChange={e=>setPriceOffer(e.target.value)} onWheel={e=>(e.target as HTMLInputElement).blur()} style={{width:"100%",marginBottom:12}}/>
                 <p style={{margin:"0 0 6px",fontSize:14,color:"var(--color-text-secondary,#888)"}}>{t.offerComment}</p>
                 <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={3} placeholder={lang==="ru"?"Почему именно вы?":"Эмне үчүн сиз?"} style={{width:"100%",resize:"none",marginBottom:12}}/>
                 <button className="rb" onClick={goToRespondPayment} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",cursor:"pointer",background:"#185FA5",color:"#fff",fontSize:14,fontWeight:700,marginBottom:6}}>{t.confirm}</button>
@@ -1468,10 +1625,14 @@ function TaskDetailScreen({ task }) {
 
 function MyTasksScreen() {
   const { lang, t, tasks, setTasks, responses, reviews, currentUser, push, addNotification } = useApp();
+  const [cancelConfirm, setCancelConfirm] = useState<any>(null);
   const deleteTask=(e,taskId)=>{e.stopPropagation();setTasks(ts=>ts.filter(tk=>tk.id!==taskId));};
   const cancelTask=(e,task)=>{
     e.stopPropagation();
-    if(!window.confirm(lang==="ru"?`Отменить задание «${task.ru}»? Деньги не возвращаются.`:`«${task.ru}» тапшырмасын жокко чыгаруу? Акча кайтарылбайт.`))return;
+    setCancelConfirm(task);
+  };
+  const doCancelTask=(task)=>{
+    setCancelConfirm(null);
     setTasks(ts=>ts.map(tk=>tk.id===task.id?{...tk,status:"cancelled"}:tk));
     const responders=responses.filter(r=>r.taskId===task.id);
     responders.forEach(r=>{
@@ -1486,6 +1647,18 @@ function MyTasksScreen() {
   return (
     <div className="si" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
       <ScreenHeader title={t.myTasks}/>
+      {cancelConfirm&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:"100%",maxWidth:320}}>
+            <p style={{margin:"0 0 8px",fontWeight:700,fontSize:16}}>{lang==="ru"?"Отменить задание?":"Тапшырманы жокко чыгаруу?"}</p>
+            <p style={{margin:"0 0 20px",fontSize:13,color:"#888"}}>«{cancelConfirm.ru}»</p>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setCancelConfirm(null)} style={{flex:1,padding:"10px",borderRadius:10,border:"1px solid #ddd",background:"#fff",fontSize:14,cursor:"pointer"}}>{lang==="ru"?"Отмена":"Жок"}</button>
+              <button onClick={()=>doCancelTask(cancelConfirm)} style={{flex:1,padding:"10px",borderRadius:10,border:"none",background:"#A32D2D",color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>{lang==="ru"?"Отменить":"Жокко чыгаруу"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{flex:1,overflowY:"auto",padding:"10px 14px 20px"}}>
         {myTasks.length===0?<div style={{textAlign:"center",padding:"50px 0",color:"var(--color-text-secondary,#888)",fontSize:13}}>{t.noTasks_my}</div>
         :myTasks.map((task,i)=>{
@@ -1502,6 +1675,7 @@ function MyTasksScreen() {
               {task.status==="completed"&&chosenResp&&!hasReview&&(<div style={{marginTop:8,padding:"6px 10px",background:"#FFF8E6",borderRadius:8,border:"0.5px solid #F0C040",fontSize:11,color:"#7A5C00",fontWeight:500}}>⭐ {t.leaveReviewHint}</div>)}
               {task.status==="completed"&&(<div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}}><button onClick={e=>deleteTask(e,task.id)} style={{padding:"4px 12px",borderRadius:7,border:"0.5px solid #A32D2D",background:"#FCEBEB",cursor:"pointer",fontSize:11,color:"#A32D2D",fontWeight:600}}>{t.deleteTask}</button></div>)}
               {task.status==="cancelled"&&(<div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}} onClick={e=>e.stopPropagation()}><button onClick={e=>deleteTask(e,task.id)} style={{padding:"3px 10px",borderRadius:6,border:"0.5px solid #A32D2D",background:"#FCEBEB",cursor:"pointer",fontSize:10,color:"#A32D2D",fontWeight:600}}>🗑 {lang==="ru"?"Удалить отменённое задание":"Жокко чыгарылганды өчүрүү"}</button></div>)}
+              {task.status==="closed_expired"&&(<div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}} onClick={e=>e.stopPropagation()}><button onClick={e=>deleteTask(e,task.id)} style={{padding:"3px 10px",borderRadius:6,border:"0.5px solid #888",background:"#F4F4F4",cursor:"pointer",fontSize:10,color:"#666",fontWeight:600}}>🗑 {lang==="ru"?"Удалить задание":"Тапшырманы өчүрүү"}</button></div>)}
               {task.status==="open"&&(<div style={{marginTop:6,display:"flex",flexDirection:"column",alignItems:"flex-end"}} onClick={e=>e.stopPropagation()}>
                 <button onClick={e=>cancelTask(e,task)} style={{padding:"3px 10px",borderRadius:6,border:"0.5px solid #A32D2D",background:"#FCEBEB",cursor:"pointer",fontSize:10,color:"#A32D2D",fontWeight:600}}>{t.cancelTask}</button>
               </div>)}
@@ -1513,13 +1687,55 @@ function MyTasksScreen() {
   );
 }
 
+function MyResponseCard({resp,i,task,lang,t,statusCfg,owner,push,reviews,currentUser,deleteResp,setLightbox}) {
+  const isCompleted=task.status==="completed";
+  const isChosen=resp.status==="chosen";
+  const cat=CATS[task.cat],loc=CITIES.find(c=>c.id===task.city),sc=(isCompleted&&isChosen)?statusCfg.completed:(statusCfg[resp.status]||statusCfg.pending);
+  const taskPhotos=useTaskPhotos(task);
+  return (
+    <div className="fe" style={{animationDelay:`${i*0.04}s`,background:"var(--color-background-primary,#fff)",border:`0.5px solid ${isChosen?"#8AC88A":"var(--color-border-tertiary,#e0e0e0)"}`,borderRadius:14,padding:"12px 13px",marginBottom:9}}>
+      <div className="card" onClick={()=>push({type:"taskDetail",task})}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><Pill color={cat.color} bg={cat.bg}>{cat.icon} {cat[lang]}</Pill>{task.urgent&&<Pill color="#A32D2D" bg="#FCEBEB">{t.urgent}</Pill>}</div><Pill color={sc.color} bg={sc.bg}>{sc.label}</Pill></div>
+        <p style={{margin:"0 0 5px",fontSize:14,fontWeight:500,color:"var(--color-text-primary,#111)",lineHeight:1.3}}>{task[lang==="ru"?"ru":"ky"]}</p>
+        <div style={{display:"flex",gap:8,fontSize:11,color:"var(--color-text-secondary,#888)",flexWrap:"wrap",alignItems:"center",marginBottom:6}}><span>{locIcon(loc?.t||"city")} {loc?locName(loc,lang):"—"}</span><span>🕐 {fmtDate(task.time)}</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"var(--color-background-secondary,#f4f4f4)",borderRadius:8}}><span style={{fontSize:11,color:"var(--color-text-secondary,#888)"}}>{t.yourOffer}</span><span style={{fontSize:13,fontWeight:600,color:"#185FA5"}}>{resp.priceOffer.toLocaleString()} сом</span></div>
+        {resp.comment&&<p style={{margin:"6px 0 0",fontSize:12,color:"var(--color-text-secondary,#888)",fontStyle:"italic"}}>"{resp.comment}"</p>}
+      </div>
+      {isChosen&&(
+        <div style={{marginTop:10,padding:"10px 12px",background:isCompleted?"#E3F0FB":"#EAF3DE",borderRadius:10,border:`0.5px solid ${isCompleted?"#A0C0E8":"#8AC88A"}`}}>
+          <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:isCompleted?"#185FA5":"#2A5E1A"}}>
+            {isCompleted
+              ?(lang==="ru"?"🏁 Вы выполнили это задание!":"🏁 Сиз бул тапшырманы аткардыңыз!")
+              :(lang==="ru"?"🎉 Вы выбраны! Ожидайте звонка от заказчика":"🎉 Сиз тандалдыңыз! Буйрутмачынын чалуусун күтүңүз")}
+          </p>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:owner&&taskPhotos.length>0?8:0}}>
+            <Avatar user={owner} size={36} fontSize={14}/>
+            <p style={{margin:0,fontSize:13,fontWeight:600,color:"#111"}}>{owner?.name||"—"}</p>
+          </div>
+          {(()=>{const imgs=(taskPhotos||[]).filter(p=>p&&(typeof p==="string"?p:p.url)&&(typeof p==="string"?p:p.url).length>10).map(p=>typeof p==="string"?p:p.url);return imgs.length>0&&(
+            <div style={{display:"flex",gap:6,overflowX:"auto",marginTop:8}}>
+              {imgs.map((src,pi)=>(
+                <img key={pi} onClick={()=>setLightbox({imgs,idx:pi})} src={src} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:8,flexShrink:0,border:"0.5px solid #8AC88A",cursor:"pointer"}}/>
+              ))}
+            </div>
+          );})()}
+        </div>
+      )}
+      {isCompleted&&resp.status==="chosen"&&(<ReviewBtn taskId={task.id} targetId={task.ownerId} taskTitle={lang==="ru"?task.ru:task.ky} reviews={reviews} currentUser={currentUser} push={push} t={t}/>)}
+      <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}} onClick={e=>e.stopPropagation()}>
+        <button onClick={e=>deleteResp(e,resp.id)} style={{padding:"3px 10px",borderRadius:6,border:"0.5px solid #A32D2D",background:"#FCEBEB",cursor:"pointer",fontSize:10,color:"#A32D2D",fontWeight:600}}>🗑 {lang==="ru"?"Удалить отклик":"Жоопту өчүрүү"}</button>
+      </div>
+    </div>
+  );
+}
+
 function MyResponsesScreen() {
   const { lang, t, tasks, responses, setResponses, reviews, currentUser, push, usersDB } = useApp();
   const SEVEN_DAYS=7*24*60*60*1000;
   const [lightbox,setLightbox]=useState(null);
   const myResponses=responses.filter(r=>r.executorId===currentUser.id);
   const deleteResp=(e,respId)=>{e.stopPropagation();setResponses(rs=>rs.filter(r=>r.id!==respId));};
-  const statusCfg={pending:{label:t.respStatus_pending,color:"#B05E0A",bg:"#FAEEDD"},chosen:{label:t.respStatus_chosen,color:"#0F6E56",bg:"#E1F5EE"},declined:{label:t.respStatus_declined,color:"#A32D2D",bg:"#FCEBEB"}};
+  const statusCfg={pending:{label:t.respStatus_pending,color:"#B05E0A",bg:"#FAEEDD"},chosen:{label:t.respStatus_chosen,color:"#0F6E56",bg:"#E1F5EE"},declined:{label:t.respStatus_declined,color:"#A32D2D",bg:"#FCEBEB"},completed:{label:lang==="ru"?"🏁 Выполнено":"🏁 Аткарылды",color:"#0F6E56",bg:"#E1F5EE"}};
   return (
     <div className="si" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
       {lightbox&&<Lightbox imgs={lightbox.imgs} startIndex={lightbox.idx} onClose={()=>setLightbox(null)}/>}
@@ -1528,42 +1744,276 @@ function MyResponsesScreen() {
         {myResponses.length===0?<div style={{textAlign:"center",padding:"50px 0",color:"var(--color-text-secondary,#888)",fontSize:13}}>{t.noMyResponses}</div>
         :myResponses.map((resp,i)=>{
           const task=tasks.find(tk=>tk.id===resp.taskId);if(!task)return null;
-          const cat=CATS[task.cat],loc=CITIES.find(c=>c.id===task.city),sc=statusCfg[resp.status]||statusCfg.pending;
-          const isCompleted=task.status==="completed";
-          const isChosen=resp.status==="chosen";
           const owner=Object.values(usersDB).find((u:any)=>u.id===task.ownerId) as any;
+          return <MyResponseCard key={resp.id} resp={resp} i={i} task={task} lang={lang} t={t} statusCfg={statusCfg} owner={owner} push={push} reviews={reviews} currentUser={currentUser} deleteResp={deleteResp} setLightbox={setLightbox}/>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CurrencyScreen() {
+  const { t, lang, pop } = useApp();
+  const [rates, setRates] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [updated, setUpdated] = useState("");
+
+  useEffect(()=>{
+    setLoading(true);
+    fetch("https://api.exchangerate-api.com/v4/latest/KGS")
+      .then(r=>r.json())
+      .then(d=>{
+        setRates(d.rates);
+        const now=new Date();
+        setUpdated(`${now.getHours().toString().padStart(2,"0")}:${now.getMinutes().toString().padStart(2,"0")}`);
+        setLoading(false);
+      })
+      .catch(()=>{setError(true);setLoading(false);});
+  },[]);
+
+  const fmt=(r:number)=>r?r.toFixed(2):"—";
+  const currencies=[
+    {code:"USD",name:lang==="ru"?"Доллар США":"АКШ Доллары",flag:"🇺🇸",color:"#1a5276"},
+    {code:"EUR",name:lang==="ru"?"Евро":"Евро",flag:"🇪🇺",color:"#1a5276"},
+    {code:"RUB",name:lang==="ru"?"Российский рубль":"Россия рублу",flag:"🇷🇺",color:"#922b21"},
+    {code:"KZT",name:lang==="ru"?"Казахский тенге":"Казак тенгеси",flag:"🇰🇿",color:"#1e8449"},
+    {code:"CNY",name:lang==="ru"?"Китайский юань":"Кытай юаны",flag:"🇨🇳",color:"#c0392b"},
+    {code:"TRY",name:lang==="ru"?"Турецкая лира":"Түрк лирасы",flag:"🇹🇷",color:"#d35400"},
+  ];
+
+  return (
+    <div className="si" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
+      <ScreenHeader title={lang==="ru"?"💱 Курсы валют":"💱 Валюта курстары"}/>
+      <div style={{flex:1,overflowY:"auto",padding:"12px 14px"}}>
+        <div style={{background:"linear-gradient(135deg,#1a5276,#2e86c1)",borderRadius:16,padding:"14px 16px",marginBottom:14,color:"#fff"}}>
+          <div style={{fontSize:13,opacity:0.8,marginBottom:4}}>{lang==="ru"?"Базовая валюта":"Негизги валюта"}</div>
+          <div style={{fontSize:22,fontWeight:700}}>🇰🇬 Кыргызский сом (KGS)</div>
+          {updated&&<div style={{fontSize:11,opacity:0.7,marginTop:4}}>{lang==="ru"?"Обновлено в":"Жаңыртылган"} {updated}</div>}
+        </div>
+        {loading&&<div style={{textAlign:"center",padding:"40px 0",color:"#888",fontSize:14}}>{lang==="ru"?"Загрузка...":"Жүктөлүүдө..."}</div>}
+        {error&&<div style={{textAlign:"center",padding:"40px 0",color:"#e74c3c",fontSize:14}}>{lang==="ru"?"Ошибка загрузки. Проверьте интернет.":"Жүктөө катасы. Интернетти текшериңиз."}</div>}
+        {rates&&currencies.map(c=>{
+          const rate=rates[c.code]?1/rates[c.code]:null;
           return (
-            <div key={resp.id} className="fe" style={{animationDelay:`${i*0.04}s`,background:"var(--color-background-primary,#fff)",border:`0.5px solid ${isChosen?"#8AC88A":"var(--color-border-tertiary,#e0e0e0)"}`,borderRadius:14,padding:"12px 13px",marginBottom:9}}>
-              <div className="card" onClick={()=>push({type:"taskDetail",task})}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><Pill color={cat.color} bg={cat.bg}>{cat.icon} {cat[lang]}</Pill>{task.urgent&&<Pill color="#A32D2D" bg="#FCEBEB">{t.urgent}</Pill>}</div><Pill color={sc.color} bg={sc.bg}>{sc.label}</Pill></div>
-                <p style={{margin:"0 0 5px",fontSize:14,fontWeight:500,color:"var(--color-text-primary,#111)",lineHeight:1.3}}>{task[lang==="ru"?"ru":"ky"]}</p>
-                <div style={{display:"flex",gap:8,fontSize:11,color:"var(--color-text-secondary,#888)",flexWrap:"wrap",alignItems:"center",marginBottom:6}}><span>{locIcon(loc?.t||"city")} {loc?locName(loc,lang):"—"}</span><span>🕐 {fmtDate(task.time)}</span></div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"var(--color-background-secondary,#f4f4f4)",borderRadius:8}}><span style={{fontSize:11,color:"var(--color-text-secondary,#888)"}}>{t.yourOffer}</span><span style={{fontSize:13,fontWeight:600,color:"#185FA5"}}>{resp.priceOffer.toLocaleString()} сом</span></div>
-                {resp.comment&&<p style={{margin:"6px 0 0",fontSize:12,color:"var(--color-text-secondary,#888)",fontStyle:"italic"}}>"{resp.comment}"</p>}
-              </div>
-              {isChosen&&(
-                <div style={{marginTop:10,padding:"10px 12px",background:"#EAF3DE",borderRadius:10,border:"0.5px solid #8AC88A"}}>
-                  <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:"#2A5E1A"}}>🎉 {lang==="ru"?"Вы выбраны! Контакт заказчика:":"Сиз тандалдыңыз! Буйрутмачынын байланышы:"}</p>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:owner&&task.photos?.length>0?8:0}}>
-                    <Avatar user={owner} size={36} fontSize={14}/>
-                    <div>
-                      <p style={{margin:"0 0 1px",fontSize:13,fontWeight:600,color:"#111"}}>{owner?.name||"—"}</p>
-                      <p style={{margin:0,fontSize:12,color:"#185FA5",fontWeight:500}}>📞 {owner?.phone||"—"}</p>
-                    </div>
-                  </div>
-                  {(()=>{const imgs=(task.photos||[]).filter(p=>p&&(typeof p==="string"?p:p.url)&&(typeof p==="string"?p:p.url).length>10).map(p=>typeof p==="string"?p:p.url);return imgs.length>0&&(
-                    <div style={{display:"flex",gap:6,overflowX:"auto",marginTop:8}}>
-                      {imgs.map((src,pi)=>(
-                        <img key={pi} onClick={()=>setLightbox({imgs,idx:pi})} src={src} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:8,flexShrink:0,border:"0.5px solid #8AC88A",cursor:"pointer"}}/>
-                      ))}
-                    </div>
-                  );})()}
+            <div key={c.code} className="pb btn3d" style={{background:"var(--color-background-primary,#fff)",borderRadius:14,padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 3px 0 #ccc,0 5px 12px rgba(0,0,0,0.08)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:28}}>{c.flag}</div>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,color:"var(--color-text-primary,#111)"}}>{c.code}</div>
+                  <div style={{fontSize:11,color:"var(--color-text-secondary,#888)"}}>{c.name}</div>
                 </div>
-              )}
-              {isCompleted&&resp.status==="chosen"&&(<ReviewBtn taskId={task.id} targetId={task.ownerId} taskTitle={lang==="ru"?task.ru:task.ky} reviews={reviews} currentUser={currentUser} push={push} t={t}/>)}
-              <div style={{marginTop:6,display:"flex",justifyContent:"flex-end"}} onClick={e=>e.stopPropagation()}>
-                <button onClick={e=>deleteResp(e,resp.id)} style={{padding:"3px 10px",borderRadius:6,border:"0.5px solid #A32D2D",background:"#FCEBEB",cursor:"pointer",fontSize:10,color:"#A32D2D",fontWeight:600}}>🗑 {lang==="ru"?"Удалить отклик":"Жоопту өчүрүү"}</button>
               </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontWeight:700,fontSize:18,color:c.color}}>{rate?fmt(rate):"-"}</div>
+                <div style={{fontSize:10,color:"var(--color-text-secondary,#888)"}}>сом</div>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{textAlign:"center",fontSize:11,color:"#aaa",padding:"8px 0 16px"}}>{lang==="ru"?"Курсы носят информационный характер":"Курстар маалыматтык мүнөздө"}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Уста пулу (цены на услуги/стройку) ────────────────────────────────────
+const SERVICE_CITIES = ["Бишкек","Токмок","Кара-Балта","Кант","Сокулук","Кемин","Суусамыр","Ала-Арча","Кара-Кол","Ысык-Кол","Балыкчы","Чолпон-Ата","Нарын","Талас","Джалал-Абад","Сузак","Кочкор-Ата","Базар-Коргон","Ноокен","Таш-Комур","Токтогул","Аксы","Чаткал","Ош","Кара-Суу","Ноокат","Алай","Кара-Кулжа","Эркеч-Там","Баткен","Исфана","Кызыл-Кыя","Сулукту","Кадамжай","Лейлек"];
+
+const SERVICE_PRICE_CATEGORIES = [
+  { id:"exterior", ru:"Сырткы иш", ky:"Сырткы иш", items:[
+    {id:1,name:"Бетон 1 куб",def:"3000-3500"},
+    {id:2,name:"Бетон п/м 0,5х1м",def:"1000"},
+    {id:3,name:"Бетон до 0,5см п/м",def:"600"},
+    {id:4,name:"Сокол п/м",def:"700-1000"},
+    {id:5,name:"Котлован 1м²",def:"1200"},
+    {id:6,name:"Кирпич черный 1 этаж",def:"10-12"},
+    {id:7,name:"Кирпич черный 2 этаж",def:"12-15"},
+    {id:8,name:"Кирпич под расшивка",def:"15-16"},
+    {id:9,name:"Кирпич олицовка",def:"20-25"},
+    {id:10,name:"Кирпич пол м²",def:"600"},
+    {id:11,name:"Кам кирпич",def:"8-12"},
+    {id:12,name:"Пескоблок черный 0,15; 0,20",def:"30-35"},
+    {id:13,name:"Пескоблок подрасшивка 0,15; 0,20",def:"35-40"},
+    {id:14,name:"Тумба пескоблок",def:"60-100"},
+    {id:15,name:"Пеноблок, газоблок",def:"80-100"},
+    {id:16,name:"Перемычка сейсмопояс 1 этаж",def:"600-800"},
+    {id:17,name:"Перемычка сейсмопояс 2 этаж",def:"800-1000"},
+    {id:18,name:"Колонна с каркас п/м",def:"1500"},
+    {id:19,name:"Регил п/м 0,40х0,40",def:"1500-2000"},
+    {id:20,name:"Регил п/м 0,40х0,60",def:"2000-3000"},
+    {id:21,name:"Монолит 1м²",def:"1500-2000"},
+    {id:22,name:"Плита басуу 1шт",def:"700"},
+    {id:23,name:"Плита монтаж",def:"2000-3000"},
+    {id:24,name:"Черный кагуу 1м²",def:"250-300"},
+    {id:25,name:"Черный ылай 1м²",def:"350-600"},
+    {id:26,name:"Крыша односкат 1м²",def:"600"},
+    {id:27,name:"Крыша двухскат 1м²",def:"800"},
+    {id:28,name:"Крыша конверт 1м²",def:"800-1000"},
+    {id:29,name:"Сайдинг 1 этаж п/м",def:"600"},
+    {id:30,name:"Сайдинг 2 этаж п/м",def:"800-1000"},
+    {id:31,name:"Слив труба 1 этаж п/м",def:"150"},
+    {id:32,name:"Слив труба 2 этаж п/м",def:"200"},
+    {id:33,name:"Штукатурка 1м²",def:"350-500"},
+    {id:34,name:"Засыпка м²",def:"100-1000"},
+    {id:35,name:"Стяжка 0,5см м²",def:"300"},
+    {id:36,name:"Жыгач пол м²",def:"500-700"},
+    {id:37,name:"Шлифовка м²",def:"200"},
+    {id:38,name:"Брусчатка смесь м²",def:"400"},
+    {id:39,name:"Брусчатка без смесь м²",def:"550"},
+    {id:40,name:"Борлюр 1 шт",def:"150"},
+    {id:41,name:"Септик, кудук п/м",def:"3000-4000"},
+    {id:42,name:"Септик, кудук кую п/м",def:"12000-20000"},
+    {id:43,name:"Пакса үй п/м",def:"2500-4000"},
+    {id:44,name:"Франтон м²",def:"500-700"},
+    {id:45,name:"Траншея п/м",def:"250-300"},
+    {id:46,name:"Фасад клинкер м²",def:"500-700"},
+    {id:47,name:"Лестница ступенка",def:"2000-3000"},
+    {id:48,name:"Темир лестница ступенка",def:"2000"},
+    {id:49,name:"Перила п/м",def:"1000-1500"},
+    {id:50,name:"Установка ворота",def:"15000"},
+    {id:51,name:"Установка калитка",def:"5000"},
+    {id:52,name:"Сетка забор п/м",def:"400"},
+    {id:53,name:"Крыша краска м²",def:"200"},
+    {id:54,name:"Демонтаж кыруу м²",def:"150-200"},
+    {id:55,name:"Опалубка установка п/м",def:"350"},
+  ]},
+  { id:"interior", ru:"Ички иш", ky:"Ички иш", items:[
+    {id:1,name:"ТВ зона м²",def:"500"},
+    {id:2,name:"По полу м² классический",def:"4000-5000"},
+    {id:3,name:"Наливной м²",def:"150-180"},
+    {id:4,name:"Пластик потолок м²",def:"500-800"},
+    {id:5,name:"МДФ потолок м²",def:"500-800"},
+    {id:6,name:"МДФ стена м²",def:"500-600"},
+    {id:7,name:"Потолок гипсо без шпаклевки м²",def:"450-1000"},
+    {id:8,name:"Стена гипсо без шпаклевки м²",def:"400-550"},
+    {id:9,name:"ОЗБ пол м²",def:"300-500"},
+    {id:10,name:"ОЗБ потолок м²",def:"400-600"},
+    {id:11,name:"Вагонка м²",def:"500-600"},
+    {id:12,name:"Стекловата м²",def:"150-200"},
+    {id:13,name:"Дверь внутренний с замком",def:"3000-3500"},
+    {id:14,name:"Добор 1шт",def:"1000"},
+    {id:15,name:"Дверь наружный",def:"3000-4000"},
+    {id:16,name:"Замок 1 шт",def:"800"},
+    {id:17,name:"Установка айнек",def:"1000"},
+    {id:18,name:"Кафель м²",def:"900-1500"},
+    {id:19,name:"Гибкий мрамор м²",def:"500-1000"},
+    {id:20,name:"Мозайка м²",def:"1000-1500"},
+    {id:21,name:"Сверло 1 шт",def:"200"},
+    {id:22,name:"Шпаклевка стена м²",def:"120-150"},
+    {id:23,name:"Шпаклевка потолок м²",def:"150-170"},
+    {id:24,name:"Шкурка м²",def:"50"},
+    {id:25,name:"Грунтовка м²",def:"50"},
+    {id:26,name:"Бетонконтакт м²",def:"50"},
+    {id:27,name:"Обои м²",def:"350-600"},
+    {id:28,name:"Откос п/м",def:"300-400"},
+    {id:29,name:"Водоэмульсия краска м²",def:"150-250"},
+    {id:30,name:"Багет п/м",def:"100-150"},
+    {id:31,name:"Пол плинтус п/м",def:"100-150"},
+    {id:32,name:"Ламинат м²",def:"300-500"},
+    {id:33,name:"Жидкий обои м²",def:"250-500"},
+    {id:34,name:"Дождик м²",def:"250-800"},
+    {id:35,name:"Снежок м²",def:"400-700"},
+    {id:36,name:"Травертин м²",def:"400-800"},
+    {id:37,name:"Лак м²",def:"400-800"},
+    {id:38,name:"Труба краска п/м",def:"50-150"},
+    {id:39,name:"1 точка включатель",def:"400-500"},
+    {id:40,name:"Электр зым штроба п/м",def:"40-50"},
+    {id:41,name:"Шит сборка 1 автомат",def:"300"},
+    {id:42,name:"Датчик",def:"500-1500"},
+    {id:43,name:"Люстра",def:"1000-5000"},
+    {id:44,name:"Распред коробка",def:"700"},
+    {id:45,name:"Пускатель автомат",def:"2000-8000"},
+  ]},
+  { id:"plumbing", ru:"Сантехника", ky:"Сантехника", items:[
+    {id:1,name:"1 точка черновой",def:"2000-3000"},
+    {id:2,name:"Унитаз, раковина, ванна, аристон",def:"2000"},
+    {id:3,name:"Канализация сотка труба п/м",def:"100-150"},
+    {id:4,name:"Канализация 0,5 труба п/м",def:"50-100"},
+    {id:5,name:"Отопление 1 точка",def:"4000-5000"},
+  ]},
+];
+
+const fbSaveServicePrice = (city:string, catId:string, itemId:number, price:string) =>
+  setDoc(doc(fbDb,"servicePrices",`${city}_${catId}_${itemId}`), {city,category:catId,itemId,price,updatedAt:Date.now()}).catch(console.warn);
+
+function ServicePricesScreen() {
+  const { lang } = useApp();
+  const [city,setCity] = useState(SERVICE_CITIES[0]);
+  const [catId,setCatId] = useState(SERVICE_PRICE_CATEGORIES[0].id);
+  const [prices,setPrices] = useState<Record<string,string>>({});
+  const [editingId,setEditingId] = useState<number|null>(null);
+  const [draft,setDraft] = useState("");
+  const category = SERVICE_PRICE_CATEGORIES.find(c=>c.id===catId)!;
+
+  useEffect(()=>{
+    setPrices({});
+    const unsub = onSnapshot(query(collection(fbDb,"servicePrices"), where("city","==",city)), snap=>{
+      const map:Record<string,string> = {};
+      snap.docs.forEach(d=>{ const data=d.data() as any; map[`${data.category}_${data.itemId}`]=data.price; });
+      setPrices(map);
+    });
+    return ()=>unsub();
+  },[city]);
+
+  const startEdit = (id:number, current:string) => { setEditingId(id); setDraft(current); };
+  const saveEdit = (id:number) => {
+    const val = draft.trim();
+    if(val){ fbSaveServicePrice(city,catId,id,val); setPrices(p=>({...p,[`${catId}_${id}`]:val})); }
+    setEditingId(null);
+  };
+
+  return (
+    <div className="si" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
+      <ScreenHeader title={lang==="ru"?"🔧 Цена услуг":"🔧 Уста пулу"}/>
+      <div style={{padding:"10px 14px 0",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <div style={{flex:1,minWidth:0,display:"flex",gap:6,overflowX:"auto",paddingBottom:8}}>
+            {SERVICE_CITIES.map(c=>(
+              <button key={c} onClick={()=>setCity(c)} className="pb"
+                style={{flexShrink:0,padding:"6px 12px",borderRadius:20,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",background:city===c?"linear-gradient(145deg,#2478c8,#185FA5)":"var(--color-background-primary,#fff)",color:city===c?"#fff":"var(--color-text-secondary,#888)",boxShadow:city===c?"0 3px 0 #0a3a6a":"0 1px 3px rgba(0,0,0,0.1)"}}>
+                {c}
+              </button>
+            ))}
+          </div>
+          <span style={{flexShrink:0,fontSize:11,fontWeight:700,color:"#185FA5",paddingBottom:8}}>{lang==="ru"?"Ещё →":"Дагы →"}</span>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:6,padding:"0 14px 10px",flexShrink:0}}>
+        {SERVICE_PRICE_CATEGORIES.map(c=>(
+          <button key={c.id} onClick={()=>setCatId(c.id)}
+            style={{flexShrink:0,padding:"6px 12px",borderRadius:20,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",background:catId===c.id?"linear-gradient(145deg,#ff8c00,#e65100)":"var(--color-background-primary,#fff)",color:catId===c.id?"#fff":"var(--color-text-secondary,#888)",boxShadow:catId===c.id?"0 3px 0 #9a3800":"0 1px 3px rgba(0,0,0,0.1)"}}>
+            {c.ru}
+          </button>
+        ))}
+      </div>
+      <div style={{padding:"0 14px 8px",flexShrink:0}}>
+        <div style={{padding:"8px 10px",borderRadius:10,background:"#E6F1FB",border:"0.5px solid #b3d4f5"}}>
+          <p style={{margin:0,fontSize:12,fontWeight:600,color:"#185FA5",lineHeight:1.5}}>
+            {lang==="ru"
+              ?"Цены указываете вы сами — меняйте и обновляйте их в зависимости от своего города, когда захотите."
+              :"Бааларды сиз коёсуз, өзүңүздүн шаарыңызга жараша бааларды өзгөртүп, жаңылап турсаңыз болот."}
+          </p>
+        </div>
+      </div>
+      <div key={catId} className="tc" style={{flex:1,overflowY:"auto",padding:"0 14px 20px"}}>
+        {category.items.map((item,i)=>{
+          const current = prices[`${catId}_${item.id}`] || item.def;
+          const isEditing = editingId===item.id;
+          return (
+            <div key={item.id} className="fe" style={{animationDelay:`${i*0.02}s`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"10px 0",borderBottom:"0.5px solid var(--color-border-tertiary,#e0e0e0)"}}>
+              <span style={{fontSize:13,color:"var(--color-text-primary,#111)",flex:1}}>{item.name}</span>
+              {isEditing ? (
+                <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                  <input autoFocus value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveEdit(item.id);}}
+                    style={{width:90,padding:"5px 8px",fontSize:13,borderRadius:8,border:"1px solid #185FA5"}}/>
+                  <button onClick={()=>saveEdit(item.id)} style={{padding:"5px 10px",borderRadius:8,border:"none",background:"#00C244",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>✓</button>
+                </div>
+              ) : (
+                <button onClick={()=>startEdit(item.id,current)} style={{flexShrink:0,padding:"5px 12px",borderRadius:8,border:"1px solid #cce0f5",background:"#f0f7ff",color:"#185FA5",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  {current} с
+                </button>
+              )}
             </div>
           );
         })}
@@ -1572,15 +2022,200 @@ function MyResponsesScreen() {
   );
 }
 
+// Голосовой/текстовый помощник по миграционным вопросам (Россия). Голосовой ввод — через
+// Web Speech API браузера, только русский (ru-RU) — надёжно поддерживается на Android/Chrome.
+function MigrantChatScreen() {
+  const { lang, pop } = useApp();
+  const [messages, setMessages] = useState<{role:"user"|"bot",text:string}[]>([
+    { role:"bot", text: lang==="ru"
+      ? "Здравствуйте! Я ваш помощник-консультант по вопросам миграции в России, законам Кыргызстана и правам граждан Кыргызстана. Можете задать вопрос текстом или голосом на кыргызском и русском языках. Все мои ответы опираются на официальные источники, и к каждому ответу указывается, откуда взята информация!\n\n⚠️ Это справочная информация, а не юридическая консультация!"
+      : "Саламатсызбы! Мен Россиядагы миграция маселелери, Кыргызстандын мыйзамдары жана Кыргызстан жарандарынын укуктары боюнча жардамчы-консультантыңызмын. Суроону кыргыз жана орус тилдеринде текст же үн менен бере аласыз. Менин бардык жоопторум расмий булактарга таянат, ар бир жоопто маалымат кайдан алынганы көрсөтүлөт!\n\n⚠️ Бул маалыматтык маалымат, юридикалык консультация эмес!" }
+  ]);
+  const [input, setInput] = useState("");
+  const [listening, setListening] = useState(false);
+  const listRef = useRef<any>();
+
+  useEffect(()=>{ listRef.current?.scrollTo?.(0, listRef.current.scrollHeight); }, [messages]);
+
+  const [waiting, setWaiting] = useState(false);
+
+  const send = async (text:string) => {
+    const q = text.trim();
+    if (!q || waiting) return;
+    setMessages(m=>[...m, {role:"user", text:q}]);
+    setInput("");
+    setWaiting(true);
+    try {
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, lang }),
+      });
+      const data = await r.json();
+      const answer = data?.answer || (lang==="ru"
+        ? "Не удалось получить ответ. Попробуйте ещё раз."
+        : "Жооп алынган жок. Кайра аракет кылыңыз.");
+      setMessages(m=>[...m, {role:"bot", text: answer}]);
+    } catch {
+      setMessages(m=>[...m, {role:"bot", text: lang==="ru"
+        ? "Ошибка соединения. Проверьте интернет и попробуйте ещё раз."
+        : "Байланыш катасы. Интернетти текшерип, кайра аракет кылыңыз."}]);
+    } finally {
+      setWaiting(false);
+    }
+  };
+
+  // Голосовое сообщение отправляется как настоящий аудиофайл (MediaRecorder — надёжный, широко
+  // поддерживаемый API, в отличие от капризного браузерного распознавания речи). Распознаёт речь
+  // и отвечает сама Gemini на сервере — это заодно решает проблему с кыргызским языком.
+  const sendAudio = async (base64:string, mimeType:string) => {
+    if (waiting) return;
+    const placeholderIdx = { current: -1 };
+    setMessages(m=>{ placeholderIdx.current = m.length; return [...m, {role:"user", text: lang==="ru"?"🎤 Голосовое сообщение...":"🎤 Үн билдирүү..."}]; });
+    setWaiting(true);
+    try {
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio: base64, mimeType }),
+      });
+      const data = await r.json();
+      const transcript = data?.transcript;
+      const answer = data?.answer || (lang==="ru"
+        ? "Не удалось распознать голосовое сообщение. Попробуйте ещё раз."
+        : "Үн билдирүү таанылган жок. Кайра аракет кылыңыз.");
+      setMessages(m=>{
+        const copy=[...m];
+        if (transcript && copy[placeholderIdx.current]) copy[placeholderIdx.current] = {role:"user", text: transcript};
+        return [...copy, {role:"bot", text: answer}];
+      });
+    } catch {
+      setMessages(m=>[...m, {role:"bot", text: lang==="ru"
+        ? "Ошибка соединения. Проверьте интернет и попробуйте ещё раз."
+        : "Байланыш катасы. Интернетти текшерип, кайра аракет кылыңыз."}]);
+    } finally {
+      setWaiting(false);
+    }
+  };
+
+  const mediaRecorderRef = useRef<any>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream|null>(null);
+  const cancelledRef = useRef(false);
+
+  const playClick = () => {
+    try {
+      const ctx = new ((window as any).AudioContext||(window as any).webkitAudioContext)();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.setValueAtTime(880, ctx.currentTime);
+      g.gain.setValueAtTime(0.15, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.08);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime+0.08);
+      setTimeout(()=>{try{ctx.close();}catch{}}, 200);
+    } catch {}
+  };
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !(window as any).MediaRecorder) {
+      alert(lang==="ru"?"Голосовой ввод не поддерживается на этом устройстве":"Бул түзмөктө үн менен киргизүү колдоого алынбайт");
+      return;
+    }
+    if (mediaRecorderRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, channelCount:1 } });
+      streamRef.current = stream;
+      const mimeType = ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus"].find(t=>(window as any).MediaRecorder.isTypeSupported?.(t)) || "";
+      const mr = new (window as any).MediaRecorder(stream, mimeType?{mimeType}:undefined);
+      chunksRef.current = [];
+      cancelledRef.current = false;
+      mr.ondataavailable = (e:any) => { if (e.data && e.data.size>0) chunksRef.current.push(e.data); };
+      mr.onstart = () => { playClick(); setListening(true); };
+      mr.onstop = () => {
+        setListening(false);
+        try{ streamRef.current?.getTracks().forEach(t=>t.stop()); }catch{}
+        streamRef.current = null;
+        mediaRecorderRef.current = null;
+        if (cancelledRef.current) return;
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType || mimeType || "audio/webm" });
+        if (blob.size < 500) return; // слишком коротко/пусто
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result||"");
+          const base64 = dataUrl.split(",")[1] || "";
+          if (base64) sendAudio(base64, blob.type);
+        };
+        reader.readAsDataURL(blob);
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+    } catch {
+      alert(lang==="ru"?"Нет доступа к микрофону. Разрешите доступ в настройках браузера.":"Микрофонго уруксат жок. Браузер жөндөөлөрүнөн уруксат бериңиз.");
+    }
+  };
+  const confirmRecording = () => { mediaRecorderRef.current?.stop?.(); };
+  const cancelRecording = () => { cancelledRef.current = true; mediaRecorderRef.current?.stop?.(); };
+
+  const hasText = input.trim().length > 0;
+
+  return (
+    <div className="si" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
+      <ScreenHeader title={lang==="ru"?"Помощник-консультант":"Жардамчы-консультант"}/>
+      <div ref={listRef} style={{flex:1,overflowY:"auto",padding:"14px 12px",display:"flex",flexDirection:"column",gap:8}}>
+        {messages.map((m,i)=>(
+          <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"80%",padding:"9px 13px",borderRadius:14,fontSize:14,lineHeight:1.4,whiteSpace:"pre-line",background:m.role==="user"?"#185FA5":"var(--color-background-primary,#fff)",color:m.role==="user"?"#fff":"var(--color-text-primary,#111)",border:m.role==="user"?"none":"0.5px solid var(--color-border-tertiary,#e0e0e0)"}}>
+            {m.text}
+          </div>
+        ))}
+        {waiting && (
+          <div style={{alignSelf:"flex-start",padding:"9px 13px",borderRadius:14,fontSize:14,background:"var(--color-background-primary,#fff)",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",color:"var(--color-text-secondary,#888)"}}>
+            {lang==="ru"?"Печатает...":"Жазып жатат..."}
+          </div>
+        )}
+      </div>
+      <div style={{display:"flex",gap:8,padding:"10px 12px",borderTop:"0.5px solid var(--color-border-tertiary,#e0e0e0)",background:"var(--color-background-primary,#fff)",alignItems:"center"}}>
+        {listening ? (<>
+          <button onClick={cancelRecording} style={{flexShrink:0,width:44,height:44,borderRadius:22,border:"none",cursor:"pointer",background:"#FCEBEB",color:"#A32D2D",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <i className="ti ti-trash" style={{fontSize:18}}/>
+          </button>
+          <div style={{flex:1,padding:"10px 16px",borderRadius:24,background:"var(--color-background-secondary,#f4f4f4)",display:"flex",alignItems:"center",gap:8}}>
+            <span style={{width:8,height:8,borderRadius:4,background:"#A32D2D",flexShrink:0,animation:"pulseArrow 1.2s ease-in-out infinite"}}/>
+            <span style={{fontSize:14,color:"var(--color-text-secondary,#888)"}}>{lang==="ru"?"Слушаю...":"Угуп жатам..."}</span>
+          </div>
+          <button onClick={confirmRecording} style={{flexShrink:0,width:44,height:44,borderRadius:22,border:"none",cursor:"pointer",background:"#25D366",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <i className="ti ti-send" style={{fontSize:18,transform:"translateX(-1px)"}}/>
+          </button>
+        </>) : (<>
+          <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send(input);}} placeholder={lang==="ru"?"Сообщение":"Билдирүү"} style={{flex:1,padding:"10px 16px",borderRadius:24,border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",background:"var(--color-background-secondary,#f4f4f4)",fontSize:14}}/>
+          {hasText ? (
+            <button onClick={()=>send(input)} style={{flexShrink:0,width:44,height:44,borderRadius:22,border:"none",cursor:"pointer",background:"#25D366",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <i className="ti ti-send" style={{fontSize:18,transform:"translateX(-1px)"}}/>
+            </button>
+          ) : (
+            <button onClick={startRecording} style={{flexShrink:0,width:44,height:44,borderRadius:22,border:"none",cursor:"pointer",background:"#25D366",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <i className="ti ti-microphone" style={{fontSize:19}}/>
+            </button>
+          )}
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 function NotificationsScreen() {
-  const { lang, t, notifications, clearNotifications } = useApp();
+  const { lang, t, notifications, clearNotifications, tasks, push } = useApp();
+  const openTask=n=>{
+    if(!n.taskId)return;
+    const task=tasks.find(tk=>tk.id===n.taskId);
+    if(task)push({type:"taskDetail",task});
+  };
   return (
     <div className="si" style={{height:"100%",display:"flex",flexDirection:"column",background:"var(--color-background-tertiary,#f0f0f0)"}}>
       <ScreenHeader title={t.notifTitle} right={notifications.length>0?<button onClick={clearNotifications} style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:"var(--color-text-secondary,#888)"}}>✕ {lang==="ru"?"Очистить":"Тазалоо"}</button>:null}/>
       <div style={{flex:1,overflowY:"auto",padding:"10px 14px"}}>
         {notifications.length===0?<p style={{textAlign:"center",padding:"40px 0",color:"var(--color-text-secondary,#888)",fontSize:13}}>{t.noNotif}</p>
         :notifications.map((n,i)=>(
-          <div key={n.id} className="fe" style={{padding:"10px 12px",background:"var(--color-background-primary,#fff)",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",borderRadius:11,marginBottom:7,animationDelay:`${i*0.04}s`,display:"flex",gap:10,alignItems:"flex-start"}}>
+          <div key={n.id} className="fe" onClick={()=>openTask(n)} style={{padding:"10px 12px",background:"var(--color-background-primary,#fff)",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",borderRadius:11,marginBottom:7,animationDelay:`${i*0.04}s`,display:"flex",gap:10,alignItems:"flex-start",cursor:n.taskId?"pointer":"default"}}>
             <div style={{flex:1}}><p style={{margin:"0 0 2px",fontSize:13,color:"var(--color-text-primary,#111)",fontWeight:n.read?400:500}}>{n.text}</p><p style={{margin:0,fontSize:10,color:"var(--color-text-secondary,#888)"}}>{n.time}</p></div>
             {!n.read&&<div style={{width:8,height:8,borderRadius:4,background:"#185FA5",flexShrink:0,marginTop:4}}/>}
           </div>
@@ -1606,8 +2241,17 @@ function EditProfileScreen() {
   const handleSave=async()=>{
     if (!name.trim()) return; setSaving(true); await sleep(300);
     const skillsArr=skills.split(",").map(s=>s.trim()).filter(Boolean);
-    const u={...currentUser,name:name.trim(),about:about.trim(),skills:skillsArr,experience:exp.trim(),avatar:avatar||null};
-    setCurrentUser(u);saveUser(u);const db=loadUsersDB();if(db[u.phone]){db[u.phone]=u;saveUsersDB(db);setUsersDB({...db});}
+    let hasAvatar=currentUser.hasAvatar||false;
+    if(avatar&&avatar.startsWith("data:")){
+      const ok=await fbSaveAvatar(currentUser.id,avatar);
+      if(ok)hasAvatar=true;
+    } else if(avatar===null&&currentUser.hasAvatar){
+      await fbDeleteAvatar(currentUser.id);
+      hasAvatar=false;
+    }
+    const u={...currentUser,name:name.trim(),about:about.trim(),skills:skillsArr,experience:exp.trim(),avatar,hasAvatar};
+    setCurrentUser(u);saveUser(u);const db=loadUsersDB();db[u.id]=u;saveUsersDB(db);setUsersDB({...db});
+    fbSaveUser(u.id,{name:u.name,about:u.about,skills:u.skills,experience:u.experience,hasAvatar});
     setSaving(false);pop();
   };
   return (
@@ -1912,21 +2556,22 @@ function TabTasks() {
     if (uid===currentUser?.id) return currentUser;
     if (uid===MOCK_OWNER_ID) return MOCK_OWNER;
     if (uid===DEMO_EXEC_ID) return DEMO_EXECUTOR;
-    return usersDB[Object.keys(usersDB).find(k=>usersDB[k].id===uid)] || {id:uid,name:uid.slice(0,8)};
+    return usersDB[uid] || {id:uid,name:uid.slice(0,8)};
   };
   const [search,setSearch]=useState("");const [city,setCity]=useState(null);const [catId,setCatId]=useState(null);const [sort,setSort]=useState("new");const [lk,setLk]=useState(0);const [cityPickerOpen,setCityPickerOpen]=useState(false);
+  const onConsultTap=()=>push({type:"migrantChat"});
   const rekey=fn=>{fn();setLk(k=>k+1);};
   const openCityPicker=()=>setCityPickerOpen(true);
-  const SORTS=[{id:"new",l:t.sortNew},{id:"asc",l:t.sortCheap},{id:"desc",l:t.sortExpensive},{id:"dist",l:t.sortNear}];
+  const SORTS=[{id:"new",l:t.sortNew},{id:"asc",l:t.sortCheap},{id:"desc",l:t.sortExpensive}];
   const statusColor={open:"#0F6E56",closed_by_choice:"#A32D2D",closed_expired:"#888",completed:"#185FA5"};
   const statusLabel={open:t.statusOpen,closed_by_choice:t.statusClosed,closed_expired:t.statusExpired,completed:t.statusCompleted};
   const isCustomer=currentUser.role==="customer";
-  let list=tasks.filter(tk=>tk.status!=="cancelled"&&(isCustomer?(tk.status==="open"||(tk.ownerId===currentUser.id&&tk.status!=="completed")):(tk.status==="open"||(tk.status!=="completed"&&responses.some(r=>r.taskId===tk.id&&r.executorId===currentUser.id)))));
+  let list=tasks.filter(tk=>tk.status!=="cancelled"&&tk.status!=="closed_expired"&&(isCustomer?(tk.status==="open"||(tk.ownerId===currentUser.id&&tk.status!=="completed")):(tk.status==="open"||(tk.status!=="completed"&&responses.some(r=>r.taskId===tk.id&&r.executorId===currentUser.id)))));
   if (!isCustomer&&settings.myCategories.length>0) list=list.filter(tk=>settings.myCategories.includes(tk.cat));
   if (search.trim()){const q=search.toLowerCase();list=list.filter(tk=>tk.ru.toLowerCase().includes(q)||tk.ky.toLowerCase().includes(q)||CATS[tk.cat][lang].toLowerCase().includes(q));}
   if (city) list=list.filter(tk=>tk.city===city);
   if (catId!==null) list=list.filter(tk=>tk.cat===catId);
-  list.sort((a,b)=>sort==="asc"?a.price-b.price:sort==="desc"?b.price-a.price:sort==="dist"?(a.dist??999)-(b.dist??999):(b.createdAt||b.id)-(a.createdAt||a.id));
+  list.sort((a,b)=>sort==="asc"?a.price-b.price:sort==="desc"?b.price-a.price:(b.createdAt||b.id)-(a.createdAt||a.id));
   return (
     <div style={{position:"relative",height:"100%",display:"flex",flexDirection:"column"}}>
       {cityPickerOpen&&(
@@ -1935,42 +2580,50 @@ function TabTasks() {
         </div>
       )}
       <TopBar search={search} setSearch={v=>{setSearch(v);setLk(k=>k+1);}} city={city} setCity={v=>{setCity(v);setLk(k=>k+1);}} onCityPress={openCityPicker}/>
-      <div style={{padding:"6px 12px 0",background:"var(--color-background-primary,#fff)",borderBottom:"0.5px solid var(--color-border-tertiary,#e0e0e0)",flexShrink:0}}>
-        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,paddingTop:4}}>
-          <button className="pb" onClick={()=>rekey(()=>setCatId(null))} style={{flexShrink:0,width:catId===null?68:44,overflow:"hidden",display:"flex",flexDirection:"column",alignItems:"center",gap:9,background:"none",border:"none",cursor:"pointer",padding:0,transition:"width 0.3s ease,opacity 0.3s ease",opacity:1}}>
-            <div style={{width:44,height:44,borderRadius:12,background:catId===null?"linear-gradient(145deg,#2478c8,#185FA5)":"linear-gradient(145deg,#5a9ad4,#378ADD)",boxShadow:catId===null?"0 5px 0 #0a3a6a,0 8px 16px rgba(24,95,165,0.4)":"0 5px 0 #1a5490,0 8px 12px rgba(55,138,221,0.3)",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.3s ease",flexShrink:0}}>
-              <i className="ti ti-layout-grid" style={{fontSize:22,color:"#fff"}}/>
+      <div style={{padding:"3px 12px 0",background:"var(--color-background-primary,#fff)",borderBottom:"0.5px solid var(--color-border-tertiary,#e0e0e0)",flexShrink:0}}>
+        <div style={{position:"relative"}}>
+        <div style={{position:"absolute",right:1,top:14,lineHeight:1,pointerEvents:"none",zIndex:2,animation:"pulseArrow 1.4s ease-in-out infinite"}}>
+          <i className="ti ti-chevron-right" style={{color:"#185FA5",fontSize:18,display:"block"}}/>
+        </div>
+        <div style={{display:"flex",overflowX:"auto",paddingBottom:3,paddingTop:1}}>
+          <button className="pb" onClick={()=>rekey(()=>setCatId(null))} style={{flexShrink:0,width:catId===null?60:38,overflow:"hidden",display:"flex",flexDirection:"column",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",padding:0,marginRight:4,transition:"width 0.3s ease,opacity 0.3s ease",opacity:1}}>
+            <div style={{width:38,height:38,borderRadius:11,background:catId===null?"linear-gradient(145deg,#2478c8,#185FA5)":"linear-gradient(145deg,#5a9ad4,#378ADD)",boxShadow:catId===null?"0 4px 0 #0a3a6a,0 6px 12px rgba(24,95,165,0.4)":"0 4px 0 #1a5490,0 6px 10px rgba(55,138,221,0.3)",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.3s ease",flexShrink:0}}>
+              <i className="ti ti-layout-grid" style={{fontSize:19,color:"#fff"}}/>
             </div>
-            <span style={{fontSize:11,fontWeight:600,color:catId===null?"#0C447C":"#378ADD",whiteSpace:"normal",textAlign:"center",lineHeight:1.2}}>{t.allCats}</span>
+            <span style={{fontSize:10,fontWeight:600,color:catId===null?"#0C447C":"#378ADD",whiteSpace:"normal",textAlign:"center",lineHeight:1.2}}>{t.allCats}</span>
           </button>
-          {CATS.map(c=>{
+          {CATS_DISPLAY.map(c=>{
             const isSelected=catId===c.id;
             const isHidden=catId!==null&&!isSelected;
             return(
-            <button key={c.id} className="pb" onClick={()=>rekey(()=>setCatId(c.id))} style={{flexShrink:0,width:isHidden?0:68,overflow:"hidden",display:"flex",flexDirection:"column",alignItems:"center",gap:9,background:"none",border:"none",cursor:"pointer",padding:0,transition:"width 0.35s ease,opacity 0.35s ease",opacity:isHidden?0:1}}>
-              <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(145deg,${c.light},${c.color})`,boxShadow:`0 5px 0 ${c.shadow},0 8px 16px ${c.color}66`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"transform 0.1s ease",transform:isSelected?"translateY(3px)":"translateY(0)"}}>
-                <i className={`ti ${c.ti}`} style={{fontSize:22,color:"#fff"}}/>
+            <button key={c.id} className="pb" onClick={()=>rekey(()=>setCatId(c.id))} style={{flexShrink:0,width:isHidden?0:60,overflow:"hidden",display:"flex",flexDirection:"column",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",padding:0,marginRight:isHidden?0:4,transition:"width 0.35s ease,opacity 0.35s ease,margin-right 0.35s ease",opacity:isHidden?0:1}}>
+              <div style={{width:38,height:38,borderRadius:11,background:`linear-gradient(145deg,${c.light},${c.iconBgEnd||c.color})`,boxShadow:`0 4px 0 ${c.shadow},0 6px 12px ${c.color}66`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"transform 0.1s ease",transform:isSelected?"translateY(3px)":"translateY(0)"}}>
+                <i className={`ti ${c.ti}`} style={{fontSize:19,color:c.iconColor||"#fff"}}/>
               </div>
-              <span style={{fontSize:11,fontWeight:600,color:c.color,whiteSpace:"normal",textAlign:"center",lineHeight:1.2,maxWidth:60}}>{c[lang]}</span>
+              <span style={{fontSize:10,fontWeight:600,color:c.color,whiteSpace:"normal",textAlign:"center",lineHeight:1.2,maxWidth:54}}>{c[lang]}</span>
             </button>
             );
           })}
         </div>
-        <div style={{display:"flex",gap:5,paddingBottom:6}}>
-          {SORTS.map(s=><button key={s.id} className="pb btn3d" onClick={()=>rekey(()=>setSort(s.id))} style={{flexShrink:0,padding:"3px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,background:sort===s.id?"linear-gradient(145deg,#2478c8,#185FA5)":"linear-gradient(145deg,#f0f0f0,#e0e0e0)",color:sort===s.id?"#fff":"var(--color-text-secondary,#888)",fontWeight:sort===s.id?600:400,boxShadow:sort===s.id?"0 3px 0 #0a3a6a,0 5px 10px rgba(24,95,165,0.3)":"0 3px 0 #bbb,0 5px 8px rgba(0,0,0,0.1)"}}>{s.l}</button>)}
+        </div>
+        <div style={{display:"flex",gap:4,paddingBottom:4}}>
+          {SORTS.map(s=><button key={s.id} className="pb btn3d" onClick={()=>rekey(()=>setSort(s.id))} style={{flex:1,minWidth:0,padding:"5px 2px",borderRadius:9,border:"none",cursor:"pointer",fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"center",background:sort===s.id?"linear-gradient(145deg,#2478c8,#185FA5)":"linear-gradient(145deg,#f0f0f0,#e0e0e0)",color:sort===s.id?"#fff":"var(--color-text-secondary,#888)",fontWeight:sort===s.id?600:400,boxShadow:sort===s.id?"0 3px 0 #0a3a6a,0 5px 10px rgba(24,95,165,0.3)":"0 3px 0 #bbb,0 5px 8px rgba(0,0,0,0.1)"}}>{s.l}</button>)}
+          <button className="pb btn3d" onClick={()=>push({type:"currency"})} style={{flex:1,minWidth:0,padding:"5px 2px",borderRadius:9,border:"none",cursor:"pointer",fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"center",background:"linear-gradient(145deg,#e11d48,#be123c)",color:"#fff",fontWeight:600,boxShadow:"0 3px 0 #881337,0 5px 10px rgba(190,18,60,0.4)"}}>{t.sortCurrency}</button>
+          <button className="pb btn3d" onClick={()=>push({type:"servicePrices"})} style={{flex:1,minWidth:0,padding:"5px 2px",borderRadius:9,border:"none",cursor:"pointer",fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"center",background:"linear-gradient(145deg,#ff8c00,#e65100)",color:"#fff",fontWeight:600,boxShadow:"0 3px 0 #9a3800,0 5px 10px rgba(230,81,0,0.45)"}}>{t.sortServicePrices}</button>
         </div>
       </div>
       <div key={lk} style={{flex:1,overflowY:"auto",padding:"8px 12px 16px"}}>
         {list.length===0?<div style={{textAlign:"center",padding:"40px 0",color:"var(--color-text-secondary,#888)",fontSize:13}}>{t.noTasks}</div>
         :list.map((task,i)=>{
           const cat=CATS[task.cat],loc=CITIES.find(c=>c.id===task.city),sc=statusColor[task.status]||"#888",isOwn=task.ownerId===currentUser.id;
+          const owner=getUserById(task.ownerId);
           return (
-            <div key={task.id} className="card fe" style={{animationDelay:`${i*0.04}s`,background:"var(--color-background-primary,#fff)",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",borderRadius:14,padding:"12px 13px",marginBottom:8}} onClick={()=>push({type:"taskDetail",task})}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
-                <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}><Pill color={cat.color} bg={cat.bg}>{cat.icon} {cat[lang]}</Pill>{task.urgent&&<Pill color="#A32D2D" bg="#FCEBEB">{t.urgent}</Pill>}{isOwn&&<Pill color="#185FA5" bg="#E6F1FB">👤 {t.myOwnTask}</Pill>}</div>
+            <div key={task.id} className="card fe" style={{animationDelay:`${i*0.04}s`,background:"var(--color-background-primary,#fff)",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",borderRadius:14,padding:"7px 13px",marginBottom:5}} onClick={()=>push({type:"taskDetail",task})}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:3}}>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}><Avatar user={owner} size={24} fontSize={11}/><Pill color={cat.color} bg={cat.bg}>{cat.icon} {cat[lang]}</Pill>{task.urgent&&<Pill color="#A32D2D" bg="#FCEBEB">{t.urgent}</Pill>}{isOwn&&<Pill color="#185FA5" bg="#E6F1FB">👤 {t.myOwnTask}</Pill>}</div>
                 <span style={{fontSize:16,fontWeight:600,color:"var(--color-text-primary,#111)",whiteSpace:"nowrap",marginLeft:6}}>{task.price.toLocaleString()} сом</span>
               </div>
-              <p style={{margin:"0 0 6px",fontSize:14,fontWeight:500,color:"var(--color-text-primary,#111)",lineHeight:1.3}}>{task[lang==="ru"?"ru":"ky"]}</p>
+              <p style={{margin:"0 0 3px",fontSize:14,fontWeight:500,color:"var(--color-text-primary,#111)",lineHeight:1.2}}>{task[lang==="ru"?"ru":"ky"]}</p>
               <div style={{display:"flex",gap:8,fontSize:11,color:"var(--color-text-secondary,#888)",flexWrap:"wrap",alignItems:"center"}}>
                 <span>{locIcon(loc?.t||"city")} {loc?locName(loc,lang):"—"}</span><span>🕐 {fmtDate(task.time)}</span>
                 <span style={{marginLeft:"auto",fontSize:10,fontWeight:600,color:task.status==="closed_by_choice"?"#fff":sc,padding:"2px 7px",borderRadius:12,background:task.status==="closed_by_choice"?"#A32D2D":sc+"18"}}>{statusLabel[task.status]}</span>
@@ -1979,6 +2632,11 @@ function TabTasks() {
           );
         })}
       </div>
+      <button type="button" onClick={onConsultTap} aria-label="Консультация" style={{position:"absolute",zIndex:60,left:"50%",top:21,transform:"translate(-50%, -50%)",display:"flex",alignItems:"center",justifyContent:"center",gap:4,padding:"6px 9px 6px 6px",borderRadius:7,background:"linear-gradient(145deg,#00e052,#00C244)",boxShadow:"0 3px 8px rgba(0,194,68,0.4)",cursor:"pointer",border:"none",whiteSpace:"nowrap",overflow:"hidden"}}>
+        <div className="consult-sheen"/>
+        <i className="ti ti-message-chatbot" style={{fontSize:9,color:"#fff",flexShrink:0}}/>
+        <span style={{fontSize:8,fontWeight:600,color:"#fff"}}>Консультация</span>
+      </button>
     </div>
   );
 }
@@ -1996,19 +2654,21 @@ function TabCreate() {
   const DRAFT_KEY="ishtap_create_draft";
   const savedDraft=useMemo(()=>{try{const d=sessionStorage.getItem(DRAFT_KEY);return d?JSON.parse(d):null;}catch{return null;}},[]);
   const [step,setStep]=useState(savedDraft?.step||1);
-  const [form,setForm]=useState(savedDraft?.form||{title:"",cat:0,price:"",loc:"bishkek",desc:"",urgent:false});
+  const [form,setForm]=useState(savedDraft?.form||{title:"",cat:0,price:"",loc:"",desc:"",urgent:false});
   const [catPicked,setCatPicked]=useState(savedDraft?.catPicked||false);
-  const [locSearch,setLocSearch]=useState(savedDraft?.locSearch||"Бишкек");
+  const [locSearch,setLocSearch]=useState(savedDraft?.locSearch||"");
   const [locOpen,setLocOpen]=useState(false);
   const [photos,setPhotos]=useState(savedDraft?.photos||[]);
+  const [videoUrl,setVideoUrl]=useState<string|null>(null);
+  const [videoUploading,setVideoUploading]=useState(false);
+  const [videoError,setVideoError]=useState("");
+  const videoRef=useRef<any>();
   const [err1,setErr1]=useState({});
   const fmtPhone=raw=>{let d=raw.replace(/\D/g,"");if(d.startsWith("996"))d=d.slice(3);if(d.startsWith("0"))d=d.slice(1);d=d.slice(0,9);let o="+996";if(d.length>0)o+=" "+d.slice(0,3);if(d.length>3)o+=" "+d.slice(3,5);if(d.length>5)o+=" "+d.slice(5,7);if(d.length>7)o+=" "+d.slice(7,9);return o;};
-  const [form2,setForm2]=useState(savedDraft?.form2||{address:"",startDate:"",startTime:"",period:"",periodCustom:"",phone:"+996 "});
-  const [err2,setErr2]=useState({});
-  const [periodMode,setPeriodMode]=useState(savedDraft?.periodMode||"select");
+  const [form2,setForm2]=useState(savedDraft?.form2||{startDate:"",phone:currentUser?.phone||"+996 "});
   const fileRef=useRef<any>(),camRef=useRef<any>();
-  const saveDraft=useCallback(()=>{try{sessionStorage.setItem(DRAFT_KEY,JSON.stringify({step,form,form2,photos,catPicked,locSearch,periodMode}));}catch{}},
-    [step,form,form2,photos,catPicked,locSearch,periodMode]);
+  const saveDraft=useCallback(()=>{try{sessionStorage.setItem(DRAFT_KEY,JSON.stringify({step,form,form2,photos,catPicked,locSearch}));}catch{}},
+    [step,form,form2,photos,catPicked,locSearch]);
   useEffect(()=>{return()=>{sessionStorage.removeItem(DRAFT_KEY);};},[]);
   const set1=(k,v)=>{setForm(f=>({...f,[k]:v}));setErr1(e=>({...e,[k]:false}));};
   const set2=(k,v)=>{setForm2(f=>({...f,[k]:v}));setErr2(e=>({...e,[k]:false}));};
@@ -2040,100 +2700,59 @@ function TabCreate() {
     });
   };
   const removePhoto=idx=>setPhotos(p=>p.filter((_,i)=>i!==idx));
-  const v1=()=>{const e={};if(!form.title.trim())e.title=true;if(!form.price)e.price=true;setErr1(e);return!Object.keys(e).length;};
-  const v2=()=>{const e={};if(!form2.address.trim())e.address=true;    if(!/^\+996\d{9}$/.test(form2.phone.replace(/\s/g,"")))e.phone=true;setErr2(e);return!Object.keys(e).length;};
-  const goToPayment=()=>{
-    if (!v2()) return;
-    const sl=form2.startDate?(fmtDate(form2.startDate)+(form2.startTime?" "+form2.startTime:"")):(lang==="ru"?"Сегодня":"Бүгүн");
-    const periodStr=periodMode==="custom"?form2.periodCustom:form2.period;
+  const MAX_VIDEO_MB=20, MAX_VIDEO_SEC=30;
+  const pickVideo=(file:File|undefined)=>{
+    if(!file)return;
+    setVideoError("");
+    if(!file.type.startsWith("video/")){setVideoError(lang==="ru"?"Выберите видеофайл":"Видео файл тандаңыз");return;}
+    if(file.size>MAX_VIDEO_MB*1024*1024){setVideoError(lang==="ru"?`Видео больше ${MAX_VIDEO_MB} МБ`:`Видео ${MAX_VIDEO_MB} МБдан чоң`);return;}
+    const url=URL.createObjectURL(file);
+    const v=document.createElement("video");
+    v.preload="metadata";
+    v.onloadedmetadata=()=>{
+      const dur=v.duration;
+      URL.revokeObjectURL(url);
+      if(dur>MAX_VIDEO_SEC){setVideoError(lang==="ru"?`Видео длиннее ${MAX_VIDEO_SEC} секунд`:`Видео ${MAX_VIDEO_SEC} секунддан узун`);return;}
+      setVideoUploading(true);
+      fbUploadTaskVideo(currentUser.id,file).then(dlUrl=>{
+        setVideoUploading(false);
+        if(dlUrl)setVideoUrl(dlUrl);
+        else setVideoError(lang==="ru"?"Не удалось загрузить видео, попробуйте ещё раз":"Видео жүктөлгөн жок, кайра аракет кылыңыз");
+      });
+    };
+    v.src=url;
+  };
+  const removeVideo=()=>{setVideoUrl(null);setVideoError("");};
+  const v1=()=>{const e:any={};if(!form.title.trim())e.title=true;if(!form.loc)e.loc=true;if(!form.price)e.price=true;const _p=form2.phone.replace(/\s/g,"");if(!/^\+996\d{9}$/.test(_p)&&!/^\+7\d{10}$/.test(_p))e.phone=true;setErr1(e);return!Object.keys(e).length;};
+  const publish=()=>{
+    if (!v1()) return;
+    const sl=lang==="ru"?"Сегодня":"Бүгүн";
     const _now=Date.now();
-    const periodDays=(p=>{
-      if(!p)return 7;
-      const l=p.toLowerCase();
-      if(l.includes("один день")||l.includes("бир күн"))return 1;
-      if(l.includes("два дня")||l.includes("эки күн"))return 2;
-      if(l.includes("три дня")||l.includes("үч күн"))return 3;
-      if(l.includes("конца недели")||l.includes("жума"))return 7;
-      if(l.includes("конца месяца")||l.includes("ай бүтүш"))return 30;
-      const m=l.match(/(\d+)/);if(m)return parseInt(m[1]);
-      return 7;
-    })(periodStr);
-    const nt={id:_now,createdAt:_now,cat:form.cat,price:Number(form.price)||0,city:form.loc,time:sl,period:periodStr||"",urgent:form.urgent,dist:cityDist(form.loc,_userLat,_userLng),ru:form.title,ky:form.title,dRu:(form.desc||"Подробности уточняются.")+" Адрес: "+form2.address,dKy:(form.desc||"Чоо-жайы такталат.")+" Дарек: "+form2.address,photos:photos.map(p=>p.url),ownerId:currentUser.id,status:"open",reactivation_count:0,chosen_executor_id:null,expires_at:_now+periodDays*86400000,completed:false};
+    const photoUrls=photos.map(p=>p.url);
+    const nt={id:_now,createdAt:_now,cat:form.cat,price:Number(form.price)||0,city:form.loc,time:sl,period:"",urgent:form.urgent,dist:cityDist(form.loc,_userLat,_userLng),ru:form.title,ky:form.title,dRu:form.desc||"Подробности уточняются.",dKy:form.desc||"Чоо-жайы такталат.",hasPhotos:photoUrls.length>0,video:videoUrl||null,ownerId:currentUser.id,status:"open",reactivation_count:0,chosen_executor_id:null,expires_at:_now+14*86400000,completed:false};
     setTasks(ts=>[nt,...ts]);
+    if(photoUrls.length>0)fbSaveTaskPhotos(_now,photoUrls);
     addNotification(currentUser.id, lang==="ru"?`✅ Задание «${form.title}» опубликовано`:`✅ «${form.title}» жарыяланды`);
     reset();
     switchTab("tasks");
   };
-  const reset=()=>{setStep(1);setForm({title:"",cat:0,price:"",loc:"bishkek",desc:"",urgent:false});setCatPicked(false);setLocSearch("Бишкек");setLocOpen(false);setForm2({address:"",startDate:"",startTime:"",period:"",periodCustom:"",phone:"+996 "});setPhotos([]);setErr1({});setErr2({});setPeriodMode("select");};
-  const periodOptions=lang==="ru"?PERIOD_OPTIONS_RU:PERIOD_OPTIONS_KY;
-  if (step===2) return (
-    <div className="tc" style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,padding:"11px 14px",background:"var(--color-background-primary,#fff)",borderBottom:"0.5px solid var(--color-border-tertiary,#e0e0e0)",flexShrink:0}}>
-        <button className="back-btn" onClick={()=>setStep(1)}><span style={{fontSize:15}}>←</span><span>{lang==="ru"?"Назад":"Артка"}</span></button>
-        <p style={{margin:0,flex:1,fontSize:14,fontWeight:600,color:"var(--color-text-primary,#111)",textAlign:"center"}}>{t.step2Label}</p><div style={{minWidth:60}}/>
-      </div>
-      <StepBar step={2} lang={lang} t={t}/>
-      <div style={{flex:1,overflowY:"auto",padding:"14px 14px 8px"}}>
-        <div className="fe" style={{marginBottom:14}}><p style={{margin:"0 0 5px",fontSize:12,fontWeight:err2.address?600:400,color:err2.address?"#A32D2D":"var(--color-text-secondary,#888)"}}>📍 {t.fAddress}{err2.address?t.errRequired:""}</p><textarea value={form2.address} onChange={e=>set2("address",e.target.value)} placeholder={t.phAddress} rows={2} className={err2.address?"err-input":""} style={{width:"100%",resize:"none",lineHeight:1.5}}/></div>
-        <div className="fe" style={{marginBottom:14}}>
-          <p style={{margin:"0 0 7px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>🗓 {t.fStartDate}</p>
-          <input type="date" lang={lang==="ky"?"ky-KG":"ru-RU"} value={form2.startDate} onChange={e=>set2("startDate",e.target.value)} style={{width:"100%",marginBottom:10,colorScheme:"light"}}/>
-          <p style={{margin:"0 0 8px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>🕐 {lang==="ru"?"Время":"Убакыт"}</p>
-          {(()=>{
-            const MINS=[0,5,10,15,20,25,30,35,40,45,50,55];
-            const tH=form2.startTime?parseInt(form2.startTime.split(":")[0]):10;
-            const tM=form2.startTime?parseInt(form2.startTime.split(":")[1]):0;
-            const mIdx=MINS.indexOf(tM)>=0?MINS.indexOf(tM):0;
-            const setH=h=>set2("startTime",`${String(h).padStart(2,"0")}:${String(tM).padStart(2,"0")}`);
-            const setM=m=>set2("startTime",`${String(tH).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
-            const drum=(items,selIdx,onUp,onDown)=>(
-              <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:58,border:"1.5px solid var(--color-border-secondary,#ccc)",borderRadius:12,overflow:"hidden",background:"var(--color-background-primary,#fff)"}}>
-                <button onClick={onUp} style={{width:"100%",padding:"5px 0",background:"none",border:"none",borderBottom:"0.5px solid var(--color-border-tertiary,#eee)",cursor:"pointer",fontSize:13,color:"var(--color-text-secondary,#888)"}}>▲</button>
-                <div style={{padding:"3px 0",fontSize:10,color:"var(--color-text-secondary,#888)",opacity:0.5,textAlign:"center"}}>{items[(selIdx-1+items.length)%items.length]}</div>
-                <div style={{padding:"6px 0",fontSize:20,fontWeight:700,color:"#185FA5",textAlign:"center",background:"#E6F1FB",width:"100%"}}>{items[selIdx]}</div>
-                <div style={{padding:"3px 0",fontSize:10,color:"var(--color-text-secondary,#888)",opacity:0.5,textAlign:"center"}}>{items[(selIdx+1)%items.length]}</div>
-                <button onClick={onDown} style={{width:"100%",padding:"5px 0",background:"none",border:"none",borderTop:"0.5px solid var(--color-border-tertiary,#eee)",cursor:"pointer",fontSize:13,color:"var(--color-text-secondary,#888)"}}>▼</button>
-              </div>
-            );
-            const hours=Array.from({length:24},(_,i)=>String(i).padStart(2,"0"));
-            const mins=MINS.map(m=>String(m).padStart(2,"0"));
-            return (
-              <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
-                {drum(hours,tH,()=>setH((tH+23)%24),()=>setH((tH+1)%24))}
-                <span style={{fontSize:28,fontWeight:700,color:"var(--color-text-primary,#111)",marginBottom:4}}>:</span>
-                {drum(mins,mIdx,()=>setM(MINS[(mIdx-1+MINS.length)%MINS.length]),()=>setM(MINS[(mIdx+1)%MINS.length]))}
-              </div>
-            );
-          })()}
-        </div>
-        <div className="fe" style={{marginBottom:14}}><p style={{margin:"0 0 7px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>⏳ {t.fPeriod}</p>{periodMode==="select"?<select value={form2.period} onChange={e=>{if(e.target.value===periodOptions[periodOptions.length-1]){setPeriodMode("custom");set2("period","");}else set2("period",e.target.value);}} style={{width:"100%",colorScheme:"light"}}><option value="">{t.periodPlaceholder}</option>{periodOptions.map(o=><option key={o} value={o}>{o}</option>)}</select>:<div style={{display:"flex",gap:8}}><input autoFocus type="text" value={form2.periodCustom} onChange={e=>set2("periodCustom",e.target.value)} placeholder={lang==="ru"?"Например: до 20 июля":"Мисалы: 20-июлга чейин"} style={{flex:1}}/><button onClick={()=>{setPeriodMode("select");set2("periodCustom","");}} style={{padding:"0 10px",borderRadius:9,border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",background:"var(--color-background-secondary,#f4f4f4)",cursor:"pointer",fontSize:11,color:"var(--color-text-secondary,#888)",flexShrink:0}}>✕</button></div>}</div>
-        <div className="fe" style={{marginBottom:24}}><p style={{margin:"0 0 5px",fontSize:12,fontWeight:err2.phone?600:400,color:err2.phone?"#A32D2D":"var(--color-text-secondary,#888)"}}>📞 {t.fPhone}{err2.phone?t.errPhone:""}</p>          <input type="tel" value={form2.phone} onChange={e=>set2("phone",fmtPhone(e.target.value))} placeholder={t.phPhone} className={err2.phone?"err-input":""} style={{width:"100%"}}/></div>
-        <p style={{margin:"0 0 10px",fontSize:10,color:"#aaa",textAlign:"center",lineHeight:1.5,padding:"0 4px"}}>
-          {lang==="ru"
-            ?"Запрещается размещать задания, связанные с незаконной деятельностью, оружием, наркотиками или нарушением прав третьих лиц."
-            :"Мыйзамсыз иш-аракеттерге, куралдарга, баңгизаттарга же үчүнчү жактардын укуктарын бузууга байланыштуу тапшырмаларды жайгаштырууга тыйуу салынат."
-          }
-        </p>
-        <button className="rb btn3d" onClick={goToPayment} style={{width:"100%",padding:14,borderRadius:12,border:"none",cursor:"pointer",background:"linear-gradient(145deg,#2478c8,#185FA5)",color:"#fff",fontSize:15,fontWeight:700,marginBottom:16,boxShadow:"0 5px 0 #0a3a6a,0 8px 16px rgba(24,95,165,0.4)"}}>{lang==="ru"?"Опубликовать":"Жарыялоо"}</button>
-      </div>
-    </div>
-  );
+  const reset=()=>{setForm({title:"",cat:0,price:"",loc:"",desc:"",urgent:false});setCatPicked(false);setLocSearch("");setLocOpen(false);setForm2({startDate:"",phone:currentUser?.phone||"+996 "});setPhotos([]);setVideoUrl(null);setVideoError("");setErr1({});};
   const selCat=CATS[form.cat];
   const catPicker=catPicked
     ?(<div style={{display:"flex",alignItems:"center",gap:10}}>
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:12,background:selCat.bg,border:`1.5px solid ${selCat.color}`,flex:1}}>
-          <div style={{width:30,height:30,borderRadius:8,background:`linear-gradient(145deg,${selCat.light},${selCat.color})`,boxShadow:`0 3px 0 ${selCat.shadow}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-            <i className={`ti ${selCat.ti}`} style={{fontSize:16,color:"#fff"}}/>
+          <div style={{width:30,height:30,borderRadius:8,background:`linear-gradient(145deg,${selCat.light},${selCat.iconBgEnd||selCat.color})`,boxShadow:`0 3px 0 ${selCat.shadow}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            <i className={`ti ${selCat.ti}`} style={{fontSize:16,color:selCat.iconColor||"#fff"}}/>
           </div>
           <span style={{fontSize:13,fontWeight:600,color:selCat.color}}>{selCat[lang]}</span>
         </div>
         <button onClick={()=>setCatPicked(false)} style={{padding:"8px 12px",borderRadius:12,border:"0.5px solid var(--color-border-secondary,#ccc)",background:"var(--color-background-secondary,#f4f4f4)",cursor:"pointer",fontSize:12,color:"var(--color-text-secondary,#888)",flexShrink:0,whiteSpace:"nowrap"}}>{lang==="ru"?"Сменить":"Өзгөртүү"}</button>
       </div>)
-    :(<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,paddingTop:2}}>{CATS.map(c=>{
+    :(<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,paddingTop:2,opacity:form.title.trim()?1:0.4,pointerEvents:form.title.trim()?"auto":"none"}}>{CATS_DISPLAY.map(c=>{
         const isSel=form.cat===c.id;
         return(<button key={c.id} className="pb btn3d" onClick={()=>{set1("cat",c.id);setCatPicked(true);}} style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:0}}>
-          <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(145deg,${c.light},${c.color})`,boxShadow:`0 5px 0 ${c.shadow},0 8px 16px ${c.color}66`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <i className={`ti ${c.ti}`} style={{fontSize:22,color:"#fff"}}/>
+          <div style={{width:44,height:44,borderRadius:12,background:`linear-gradient(145deg,${c.light},${c.iconBgEnd||c.color})`,boxShadow:`0 5px 0 ${c.shadow},0 8px 16px ${c.color}66`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <i className={`ti ${c.ti}`} style={{fontSize:22,color:c.iconColor||"#fff"}}/>
           </div>
           <span style={{fontSize:10,fontWeight:600,color:c.color,whiteSpace:"normal",textAlign:"center",maxWidth:56,lineHeight:1.2}}>{c[lang]}</span>
         </button>);
@@ -2148,7 +2767,8 @@ function TabCreate() {
           value={locSearch}
           onChange={e=>{setLocSearch(e.target.value);setLocOpen(true);}}
           onFocus={()=>setLocOpen(true)}
-          placeholder={lang==="ru"?"Введите название населённого пункта...":"Айыл/шаардын атын жазыңыз..."}
+          placeholder={lang==="ru"?"Выбери город":"Шаарды тандаңыз"}
+          className={err1.loc?"err-input":""}
           style={{width:"100%",paddingRight:32}}
         />
         {locSearch.length>0&&<button onClick={()=>{setLocSearch("");setLocOpen(false);}} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:14,color:"var(--color-text-secondary,#888)",padding:0,lineHeight:1}}>✕</button>}
@@ -2172,36 +2792,80 @@ function TabCreate() {
       </div>}
     </div>
   );
-  const fields=[[t.fTitle,<input placeholder={t.phTitle} value={form.title} onChange={e=>set1("title",e.target.value)} className={err1.title?"err-input":""} style={{width:"100%"}}/>,"title"],[t.fCat,catPicker,null],[t.fLoc,locPicker,null],[t.fBudget,<input type="number" placeholder="1500" value={form.price} onChange={e=>set1("price",e.target.value)} className={err1.price?"err-input":""} style={{width:"100%"}}/>,"price"],[t.fDesc,<textarea placeholder={t.phDesc} value={form.desc} onChange={e=>set1("desc",e.target.value)} rows={3} style={{width:"100%",resize:"none"}}/>,null]];
+  const fields=[[t.fLoc,locPicker,"loc"],[t.fBudget,<input type="number" placeholder="1500" value={form.price} onChange={e=>set1("price",e.target.value)} onWheel={e=>(e.target as HTMLInputElement).blur()} className={err1.price?"err-input":""} style={{width:"100%"}}/>,"price"],[t.fDesc,<textarea placeholder={t.phDesc} value={form.desc} onChange={e=>set1("desc",e.target.value)} rows={3} style={{width:"100%",resize:"none"}}/>,null]];
   return (
     <div className="tc" style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <StepBar step={1} lang={lang} t={t}/>
       <div style={{flex:1,overflowY:"auto",padding:"12px 14px 16px"}}>
         <p style={{margin:"0 0 14px",fontSize:17,fontWeight:600,color:"var(--color-text-primary,#111)"}}>{t.newTask}</p>
+        <div className="fe" style={{marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <div style={{width:20,height:20,borderRadius:"50%",background:"#185FA5",color:"#fff",fontSize:11,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>1</div>
+            <p style={{margin:0,fontSize:12,color:err1.title?"#A32D2D":"var(--color-text-secondary,#888)",fontWeight:600}}>{t.fTitle} *{err1.title?t.errRequired:""}</p>
+          </div>
+          <input placeholder={t.phTitle} value={form.title} onChange={e=>set1("title",e.target.value)} className={err1.title?"err-input":""} style={{width:"100%",border:"1.5px solid #185FA5",boxShadow:"0 0 0 3px rgba(24,95,165,0.12)"}}/>
+        </div>
+        <div className="fe" style={{marginBottom:12}}>
+          <p style={{margin:"0 0 5px",fontSize:12,color:"var(--color-text-secondary,#888)",fontWeight:600}}>{t.fCat} *</p>
+          {catPicker}
+          {!catPicked&&<div style={{marginTop:8,padding:"8px 10px",background:"#FCEBEB",borderRadius:8,fontSize:12,color:"#A32D2D",display:"flex",gap:6,alignItems:"center"}}>⚠️ {form.title.trim()?(lang==="ru"?"Выберите категорию, чтобы продолжить":"Улантуу үчүн категорияны тандаңыз"):(lang==="ru"?"Сначала заполните название задачи":"Адегенде тапшырманын аталышын толтуруңуз")}</div>}
+        </div>
         {fields.map(([lbl,inp,ek],i)=>(<div key={i} className="fe" style={{marginBottom:12,animationDelay:`${i*0.04}s`}}><p style={{margin:"0 0 5px",fontSize:12,color:ek&&err1[ek]?"#A32D2D":"var(--color-text-secondary,#888)",fontWeight:ek&&err1[ek]?600:400}}>{lbl}{ek&&err1[ek]?t.errRequired:""}</p>{inp}</div>))}
         <div className="fe" style={{marginBottom:20}}>
-          <p style={{margin:"0 0 8px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>{lang==="ru"?"Фото (до 3)":"Сүрөт (3гө чейин)"}</p>
-          {photos.length>0&&(<div>
-            <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+          <p style={{margin:"0 0 5px",fontSize:12,fontWeight:err1.phone?600:400,color:err1.phone?"#A32D2D":"var(--color-text-secondary,#888)"}}>📞 {t.fPhone}{err1.phone?t.errRequired:""}</p>
+          <input type="tel" value={form2.phone} readOnly
+            style={{width:"100%",background:"#f0f7ff",color:"#185FA5",fontWeight:600,cursor:"default",border:"1.5px solid #b3d4f5"}}/>
+          <p style={{margin:"5px 0 0",fontSize:11,color:"#185FA5",lineHeight:1.4}}>
+            🔒 {lang==="ru"
+              ?"Используется номер, с которым вы зарегистрировались. Исполнители будут звонить на этот номер."
+              :"Катталганда колдонулган номер. Аткаруучулар ушул номерге чалышат."}
+          </p>
+        </div>
+        <div className="fe" style={{marginBottom:20}}>
+          <p style={{margin:"0 0 8px",fontSize:12,color:"var(--color-text-secondary,#888)"}}>{lang==="ru"?`Фото (до 3) и видео (до ${MAX_VIDEO_SEC} сек)`:`Сүрөт (3гө чейин) жана видео (${MAX_VIDEO_SEC} сек чейин)`}</p>
+          <div style={{display:"flex",gap:20,marginBottom:8,flexWrap:"wrap",alignItems:"flex-start"}}>
+            {photos.length===0?(
+              <button onClick={()=>fileRef.current.click()} className="pb" style={{width:130,height:130,background:"var(--color-background-secondary,#f4f4f4)",border:"none",borderRadius:12,padding:"4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0,flexShrink:0}}>
+                <div style={{width:110,height:110,borderRadius:8,background:"var(--color-background-tertiary,#f0f0f0)",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-photo" style={{fontSize:44,color:"#2E7D32"}}/></div>
+                <div style={{background:"#2E7D32",color:"#fff",fontSize:11,fontWeight:500,padding:"3px 12px",borderRadius:20,marginTop:-8}}>+ {lang==="ru"?"Добавить фото":"Сүрөт кошуу"}</div>
+              </button>
+            ):(<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {photos.map((ph,i)=>(<div key={i} style={{position:"relative",width:80,height:80,borderRadius:10,overflow:"hidden",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",flexShrink:0}}>
                 <img src={ph.url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                 <button onClick={()=>removePhoto(i)} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:10,background:"rgba(0,0,0,0.65)",border:"none",cursor:"pointer",color:"#fff",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",padding:0,fontWeight:700}}>✕</button>
               </div>))}
               {photos.length<3&&(<button onClick={()=>fileRef.current.click()} style={{width:80,height:80,borderRadius:10,border:"1.5px dashed #185FA5",background:"#E6F1FB",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,flexShrink:0}}><span style={{fontSize:18,color:"#185FA5"}}>＋</span><span style={{fontSize:9,color:"#185FA5",fontWeight:600}}>{lang==="ru"?"Добавить":"Кошуу"}</span></button>)}
-            </div>
-            <button onClick={()=>setPhotos([])} style={{background:"none",border:"none",cursor:"pointer",fontSize:11,color:"#A32D2D",padding:0,textDecoration:"underline"}}>
-              {lang==="ru"?"Очистить все фотографии":"Бардык сүрөттөрдү тазалоо"}
-            </button>
-          </div>)}
-          {photos.length===0&&(<button onClick={()=>fileRef.current.click()} className="pb" style={{width:130,height:130,background:"var(--color-background-secondary,#f4f4f4)",border:"none",borderRadius:12,padding:"4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0}}>
-            <img src="/иконка Галерея.png" alt="gallery" style={{width:110,height:110,objectFit:"contain",filter:"saturate(2) brightness(1.05)",mixBlendMode:"multiply",background:"var(--color-background-tertiary,#f0f0f0)",borderRadius:8}}/>
-            <div style={{background:"#2E7D32",color:"#fff",fontSize:11,fontWeight:500,padding:"3px 12px",borderRadius:20,marginTop:-8}}>+ {lang==="ru"?"Добавить фото":"Сүрөт кошуу"}</div>
+            </div>)}
+            {videoUrl?(
+              <div style={{position:"relative",width:130,height:130,borderRadius:12,overflow:"hidden",border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",flexShrink:0}}>
+                <video src={videoUrl} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.25)"}}><i className="ti ti-player-play-filled" style={{fontSize:28,color:"#fff"}}/></div>
+                <button onClick={removeVideo} style={{position:"absolute",top:5,right:5,width:22,height:22,borderRadius:11,background:"rgba(0,0,0,0.65)",border:"none",cursor:"pointer",color:"#fff",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",padding:0,fontWeight:700}}>✕</button>
+              </div>
+            ):videoUploading?(
+              <div style={{width:130,height:130,borderRadius:12,background:"var(--color-background-secondary,#f4f4f4)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"var(--color-text-secondary,#888)",textAlign:"center",flexShrink:0}}>{lang==="ru"?"Загрузка...":"Жүктөлүүдө..."}</div>
+            ):(
+              <button onClick={()=>videoRef.current.click()} className="pb" style={{width:130,height:130,background:"var(--color-background-secondary,#f4f4f4)",border:"none",borderRadius:12,padding:"4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0,flexShrink:0}}>
+                <div style={{width:110,height:110,borderRadius:8,background:"var(--color-background-tertiary,#f0f0f0)",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-video" style={{fontSize:44,color:"#185FA5"}}/></div>
+                <div style={{background:"#185FA5",color:"#fff",fontSize:11,fontWeight:500,padding:"3px 12px",borderRadius:20,marginTop:-8}}>+ {lang==="ru"?"Добавить видео":"Видео кошуу"}</div>
+              </button>
+            )}
+          </div>
+          {photos.length>0&&(<button onClick={()=>setPhotos([])} style={{background:"none",border:"none",cursor:"pointer",fontSize:11,color:"#A32D2D",padding:0,textDecoration:"underline",display:"block",marginBottom:6}}>
+            {lang==="ru"?"Очистить все фотографии":"Бардык сүрөттөрдү тазалоо"}
           </button>)}
           {photos.length>0&&photos.length<3&&(<button onClick={()=>fileRef.current.click()} className="pb" style={{width:"100%",padding:"7px",borderRadius:9,border:"0.5px solid var(--color-border-tertiary,#e0e0e0)",background:"var(--color-background-secondary,#f4f4f4)",cursor:"pointer",fontSize:11,color:"var(--color-text-secondary,#888)"}}>{t.gallery}</button>)}
           <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>{addFiles(e.target.files);e.target.value="";}}/>
+          <input ref={videoRef} type="file" accept="video/*" style={{display:"none"}} onChange={e=>{pickVideo(e.target.files?.[0]);e.target.value="";}}/>
           <p style={{margin:"5px 0 0",fontSize:10,color:"var(--color-text-secondary,#888)"}}>{t.photosUploaded} {photos.length} {t.photosOf} 3</p>
+          {videoError&&<p style={{margin:"6px 0 0",fontSize:11,color:"#A32D2D"}}>{videoError}</p>}
         </div>
-        <button className="rb btn3d" onClick={()=>{if(v1())setStep(2);}} style={{width:"100%",padding:14,borderRadius:12,border:"none",cursor:"pointer",background:"linear-gradient(145deg,#2478c8,#185FA5)",color:"#fff",fontSize:15,fontWeight:700,boxShadow:"0 5px 0 #0a3a6a,0 8px 16px rgba(24,95,165,0.4)"}}>{t.nextStep}</button>
+        <p style={{margin:"0 0 10px",fontSize:10,color:"#aaa",textAlign:"center",lineHeight:1.5,padding:"0 4px"}}>
+          {lang==="ru"
+            ?"Запрещается размещать задания, связанные с незаконной деятельностью, оружием, наркотиками или нарушением прав третьих лиц."
+            :"Мыйзамсыз иш-аракеттерге, куралдарга, баңгизаттарга же үчүнчү жактардын укуктарын бузууга байланыштуу тапшырмаларды жайгаштырууга тыйуу салынат."
+          }
+        </p>
+        <button className="rb btn3d" disabled={videoUploading} onClick={publish} style={{width:"100%",padding:14,borderRadius:12,border:"none",cursor:videoUploading?"default":"pointer",opacity:videoUploading?0.6:1,background:"linear-gradient(145deg,#2478c8,#185FA5)",color:"#fff",fontSize:15,fontWeight:700,boxShadow:"0 5px 0 #0a3a6a,0 8px 16px rgba(24,95,165,0.4)"}}>{videoUploading?(lang==="ru"?"Загрузка видео...":"Видео жүктөлүүдө..."):(lang==="ru"?"Опубликовать":"Жарыялоо")}</button>
       </div>
     </div>
   );
@@ -2357,7 +3021,7 @@ export default function App() {
     if(user){
       setCurrentUser(user);
       const storedT=loadTasksDB();
-      if(storedT){setTasks(storedT);}
+      if(storedT){setTasks(withExpiryApplied(storedT));}
       else{const initT=buildInitTasks();setTasks(initT);saveTasksDB(initT);saveRespDB([]);}
       const storedR=loadRespDB();
       if(storedR.length){setResponses(storedR);}else{setResponses([]);saveRespDB([]);}
@@ -2370,12 +3034,30 @@ export default function App() {
     }
   },[]);
 
+  // Живые слушатели Firestore — запускаются для любого вошедшего пользователя
+  useEffect(()=>{
+    if(authState!=="app"||!currentUser?.id)return;
+    const unsubTasks    = onSnapshot(collection(fbDb,"tasks"),        snap=>{const d=snap.docs.map(x=>x.data());if(d.length>0){setTasks(d);saveTasksDB(d);}});
+    const unsubResponses= onSnapshot(collection(fbDb,"responses"),    snap=>{const d=snap.docs.map(x=>x.data());setResponses(d);saveRespDB(d);});
+    const unsubReviews  = onSnapshot(collection(fbDb,"reviews"),      snap=>{const d=snap.docs.map(x=>x.data());setReviews(d);saveReviewsDB(d);});
+    const unsubUsers    = onSnapshot(collection(fbDb,"users"),        snap=>{const db:any={};snap.docs.forEach(x=>{const u={...x.data()};delete u.pin;db[x.id]=u;});setUsersDB(prev=>{const merged:any={...prev};Object.keys(db).forEach(k=>{merged[k]={...db[k],avatar:db[k].avatar||prev[k]?.avatar||null};});saveUsersDB(merged);return merged;});});
+    const unsubNotifs   = onSnapshot(query(collection(fbDb,"notifications"),where("userId","==",currentUser.id)),snap=>{const cleared=loadClearedNotifs();const d=snap.docs.map(x=>x.data()).filter(n=>!cleared.has(String(n.id)));setAllNotifs(d);saveNotifsDB(d);});
+    return ()=>{unsubTasks();unsubResponses();unsubReviews();unsubUsers();unsubNotifs();};
+  },[authState,currentUser?.id]);
+
   // Проверка истёкших заданий (каждую минуту)
   useEffect(()=>{
     if (authState!=="app") return;
     const check=()=>{
       const now=Date.now();
-      setTasks(prev=>{
+      // Раньше здесь использовался "сырой" setTasks/setResponses (просто React-стейт, без
+      // сохранения) — статус "истекло" никогда по-настоящему не попадал ни в localStorage,
+      // ни в Firestore. Из-за этого при каждом новом заходе в приложение (или на другом
+      // устройстве) проверка снова находила то же самое задание как "открытое и просроченное"
+      // и заново слала уведомление — отсюда дублирующиеся уведомления, которые не исчезали
+      // даже после очистки. Теперь используем setTasksPersist/setRespPersist — они и меняют
+      // локальный стейт, и сохраняют результат в localStorage и Firestore по-настоящему.
+      setTasksPersist(prev=>{
         const expired=prev.filter(tk=>tk.status==="open"&&(typeof tk.expires_at==="number"?tk.expires_at:new Date(tk.expires_at).getTime())<now);
         if (!expired.length) return prev;
         // side-effects вне updater — откладываем через setTimeout
@@ -2383,15 +3065,11 @@ export default function App() {
           expired.forEach(tk=>{
             const title=lang==="ru"?tk.ru:tk.ky;
             addNotification(tk.ownerId, lang==="ru"?`⏰ Срок задания «${title}» истёк`:`⏰ «${title}» тапшырмасынын мөөнөтү өттү`);
-            setResponses(rs=>{
-              const updated=rs.map(r=>{
-                if (r.taskId!==tk.id||r.status!=="pending") return r;
-                setTimeout(()=>addNotification(r.executorId, lang==="ru"?`⏰ Задание «${title}» истекло, ваш отклик отменён`:`⏰ «${title}» мөөнөтү өттү, жообуңуз жокко чыгарылды`),0);
-                return {...r,status:"declined"};
-              });
-              saveRespDB(updated);
-              return updated;
-            });
+            setRespPersist(rs=>rs.map(r=>{
+              if (r.taskId!==tk.id||r.status!=="pending") return r;
+              setTimeout(()=>addNotification(r.executorId, lang==="ru"?`⏰ Задание «${title}» истекло, ваш отклик отменён`:`⏰ «${title}» мөөнөтү өттү, жообуңуз жокко чыгарылды`),0);
+              return {...r,status:"declined"};
+            }));
           });
         },0);
         return prev.map(tk=>tk.status==="open"&&(typeof tk.expires_at==="number"?tk.expires_at:new Date(tk.expires_at).getTime())<now?{...tk,status:"closed_expired"}:tk);
@@ -2401,20 +3079,20 @@ export default function App() {
   },[authState,lang]);
 
   // Persist helpers (localStorage + Firestore background sync)
-  const setTasksPersist    = useCallback(u=>setTasks(p=>{const n=typeof u==="function"?u(p):u;saveTasksDB(n);fbSyncTasks(n);return n;}),[]);
-  const setRespPersist     = useCallback(u=>setResponses(p=>{const n=typeof u==="function"?u(p):u;saveRespDB(n);fbSyncResponses(n);return n;}),[]);
+  const setTasksPersist    = useCallback(u=>setTasks(p=>{const n=typeof u==="function"?u(p):u;saveTasksDB(n);fbSyncTasks(p,n);return n;}),[]);
+  const setRespPersist     = useCallback(u=>setResponses(p=>{const n=typeof u==="function"?u(p):u;saveRespDB(n);fbSyncResponses(p,n);return n;}),[]);
   const setReviewsPersist  = useCallback(u=>setReviews(p=>{const n=typeof u==="function"?u(p):u;saveReviewsDB(n);fbSyncReviews(n);return n;}),[]);
-  const setAllNotifsPersist= useCallback(u=>setAllNotifs(p=>{const n=typeof u==="function"?u(p):u;saveNotifsDB(n);fbSyncNotifs(n);return n;}),[]);
+  const setAllNotifsPersist= useCallback(u=>setAllNotifs(p=>{const n=typeof u==="function"?u(p):u;saveNotifsDB(n);fbSyncNotifs(p,n);return n;}),[]);
 
   /**
    * addNotification(userId, text) — отправить конкретному пользователю
    * addNotification(text)         — отправить текущему пользователю (обратная совместимость)
    */
-  const addNotification = useCallback((uidOrText, maybeText)=>{
+  const addNotification = useCallback((uidOrText, maybeText, meta)=>{
     const uid = maybeText!==undefined ? uidOrText : currentUser?.id;
     const msg = maybeText!==undefined ? maybeText  : uidOrText;
     if (!uid||!msg) return;
-    const notif={id:`n_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,userId:uid,text:msg,read:false,time:nowStr()};
+    const notif={id:`n_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,userId:uid,text:msg,read:false,time:nowStr(),...(meta||{})};
     setAllNotifsPersist(ns=>[notif,...ns].slice(0,500));
   },[currentUser?.id, setAllNotifsPersist]);
 
@@ -2426,8 +3104,7 @@ export default function App() {
     const u={...currentUser,role};setCurrentUser(u);saveUser(u);
     if(u.id)fbSaveUser(u.id,u);
     const db=loadUsersDB();
-    const key=u.email||u.phone||u.id;
-    if(key){db[key]=u;saveUsersDB(db);}
+    if(u.id){db[u.id]=u;saveUsersDB(db);}
     setUsersDB({...db});
     setAuthState("app");
   },[currentUser]);
@@ -2441,7 +3118,7 @@ export default function App() {
     setCurrentUser(user);saveUser(user);
     const db=loadUsersDB();setUsersDB(db);
     const stored=loadTasksDB();
-    if(stored){setTasks(stored);}
+    if(stored){setTasks(withExpiryApplied(stored));}
     else{const initT=buildInitTasks();setTasks(initT);saveTasksDB(initT);saveRespDB([]);}
     setResponses(loadRespDB());
     setReviews(loadReviewsDB());
@@ -2458,8 +3135,14 @@ export default function App() {
   // Уведомления текущего пользователя (производное от allNotifs)
   const notifications = allNotifs.filter(n=>n.userId===currentUser?.id);
   const clearNotifications = useCallback(()=>{
+    const idsToDelete = allNotifs.filter(n=>n.userId===currentUser?.id).map(n=>String(n.id));
+    // Сохраняем в localStorage чтобы onSnapshot не восстанавливал их
+    const cleared = loadClearedNotifs();
+    idsToDelete.forEach(id=>cleared.add(id));
+    saveClearedNotifs(cleared);
+    fbDeleteNotifs(idsToDelete);
     setAllNotifsPersist(ns=>ns.filter(n=>n.userId!==currentUser?.id));
-  },[currentUser?.id, setAllNotifsPersist]);
+  },[currentUser?.id, allNotifs, setAllNotifsPersist]);
 
   const renderNav=entry=>{
     switch(entry.type){
@@ -2467,6 +3150,9 @@ export default function App() {
       case "payment":       return <PaymentScreen paymentType={entry.paymentType} taskTitle={entry.taskTitle} onConfirm={entry.onConfirm.fn}/>;
       case "cityPicker":    return <CityPickerScreen currentCity={entry.currentCity} onSelect={entry.onSelect.fn}/>;
       case "notifications": return <NotificationsScreen/>;
+      case "currency":      return <CurrencyScreen/>;
+      case "servicePrices": return <ServicePricesScreen/>;
+      case "migrantChat":   return <MigrantChatScreen/>;
       case "myTasks":       return <MyTasksScreen/>;
       case "settings":      return <SettingsScreen/>;
       case "myResponses":   return <MyResponsesScreen/>;
@@ -2480,11 +3166,11 @@ export default function App() {
   };
 
   if (authState===null) return (
-    <div style={{maxWidth:390,margin:"0 auto",height:720,display:"flex",alignItems:"center",justifyContent:"center",background:"#fff",borderRadius:24,border:"0.5px solid #e0e0e0"}}>
+    <div style={{maxWidth:390,margin:"0 auto",height:"100dvh",maxHeight:"clamp(100dvh,100dvh,900px)",display:"flex",alignItems:"center",justifyContent:"center",background:"#fff",borderRadius:"clamp(0px,calc((100vw - 480px)*999),24px)",border:"0.5px solid #e0e0e0"}}>
       <div style={{textAlign:"center"}}><div style={{fontSize:52,marginBottom:10}}>🇰🇬</div><p style={{fontSize:20,fontWeight:700,color:"#F57C00",margin:0}}>Иштерман</p></div>
     </div>
   );
-  const shell = (child:any) => <div style={{maxWidth:390,margin:"0 auto",position:"relative",background:"#f0f0f0",borderRadius:24,overflow:"hidden",height:720,display:"flex",flexDirection:"column",border:"0.5px solid #e0e0e0"}}><style>{css}</style>{child}</div>;
+  const shell = (child:any) => <div style={{maxWidth:390,margin:"0 auto",position:"relative",background:"#f0f0f0",borderRadius:"clamp(0px,calc((100vw - 480px)*999),24px)",overflow:"hidden",height:"100dvh",maxHeight:"clamp(100dvh,100dvh,900px)",display:"flex",flexDirection:"column",border:"0.5px solid #e0e0e0"}}><style>{css}</style>{child}</div>;
   if (authState==="lang")  return shell(<LangScreen onSelect={l=>{setLang(l);setAuthState("login");}}/>);
   if (authState==="login") return shell(<LoginScreen lang={lang} setLang={setLang} onLogin={handleLogin}/>);
   if (authState==="role")  return shell(<RoleScreen lang={lang} user={currentUser} onSelectRole={handleSelectRole}/>);
@@ -2509,7 +3195,7 @@ export default function App() {
         <div style={{flex:1,overflow:"hidden",position:"relative",display:"flex",flexDirection:"column"}}>
           {currentNav
             ?<div style={{height:"100%",display:"flex",flexDirection:"column"}}>{renderNav(currentNav)}</div>
-            :<div key={`${tab}-${tabKey}-${lang}`} style={{height:"100%",display:"flex",flexDirection:"column"}} className="tc">
+            :<div key={`${tab}-${tabKey}`} style={{height:"100%",display:"flex",flexDirection:"column"}} className="tc">
               {tab==="tasks"&&<TabTasks/>}{tab==="create"&&<TabCreate/>}{tab==="profile"&&<TabProfile/>}
             </div>
           }
@@ -2561,21 +3247,32 @@ export function AdminDashboard() {
   const [authed,setAuthed]   = useState(false);
   const [email,setEmail]     = useState("");
   const [pass,setPass]       = useState("");
+  const [showPass,setShowPass] = useState(false);
   const [err,setErr]         = useState("");
+  const [successMsg,setSuccessMsg] = useState("");
   const [loading,setLoading] = useState(false);
   const [stats,setStats]     = useState<any>(null);
   const [statsLoading,setStatsLoading] = useState(false);
   const [lastRefresh,setLastRefresh]   = useState<Date|null>(null);
 
   const login = async()=>{
-    setLoading(true);setErr("");
+    setLoading(true);setErr("");setSuccessMsg("");
     try{
-      const {signInWithEmailAndPassword:signIn}=await import("firebase/auth");
-      const cred=await signIn(fbAuth,email,pass);
+      const cred=await signInWithEmailAndPassword(fbAuth,email,pass);
       if(cred.user.email!==ADMIN_EMAIL){setErr("Доступ запрещён");await fbAuth.signOut();setLoading(false);return;}
       setAuthed(true);
     }catch(e:any){setErr("Неверный email или пароль");}
     setLoading(false);
+  };
+
+  const resetPassword = async()=>{
+    setErr("");setSuccessMsg("");
+    if(!email){setErr("Введите email для сброса пароля");return;}
+    try{
+      const {sendPasswordResetEmail}=await import("firebase/auth");
+      await sendPasswordResetEmail(fbAuth,email);
+      setSuccessMsg("Письмо для сброса пароля отправлено на "+email);
+    }catch(e:any){setErr("Ошибка отправки письма. Проверьте email.");}
   };
 
   const loadStats = useCallback(async()=>{
@@ -2587,13 +3284,36 @@ export function AdminDashboard() {
 
   useEffect(()=>{if(authed)loadStats();},[authed,loadStats]);
 
+  // Регистрации сегодня — отдельный живой счётчик (onSnapshot), не зависит от часового
+  // пояса устройства администратора: день считается по времени Бишкека (UTC+6).
+  const [todayCustomers,setTodayCustomers] = useState(0);
+  const [todayExecutors,setTodayExecutors] = useState(0);
+  useEffect(()=>{
+    if(!authed) return;
+    const unsub = onSnapshot(collection(fbDb,"users"), snap=>{
+      const now=new Date();
+      const bishkekMs=now.getTime()+now.getTimezoneOffset()*60000+6*3600000;
+      const bishkekNow=new Date(bishkekMs);
+      const todayStart=new Date(bishkekNow.getFullYear(),bishkekNow.getMonth(),bishkekNow.getDate()).getTime()-6*3600000;
+      let c=0,e=0;
+      snap.docs.forEach(d=>{
+        const u=d.data();
+        if(!u.createdAt||u.createdAt<todayStart) return;
+        if(u.role==="customer") c++;
+        else if(u.role==="executor") e++;
+      });
+      setTodayCustomers(c);setTodayExecutors(e);
+    });
+    return ()=>unsub();
+  },[authed]);
+
   const logout=async()=>{await fbAuth.signOut();setAuthed(false);setStats(null);};
 
   const SUBS=[
     {name:"Firebase (Blaze)",color:"#F57C00",icon:"🔥",items:[
-      {label:"SMS лимит",value:"~2500/мес ($25 бюджет)"},
-      {label:"Firestore",value:"50k чтений/день бесплатно"},
-      {label:"Тариф",value:"Blaze — pay as you go"},
+      {label:"Firestore",value:"Pay-as-you-go, лимиты Spark не действуют"},
+      {label:"Storage",value:"Видео заданий и модели — платный тариф позволяет"},
+      {label:"Тариф",value:"Blaze — платный (по факту использования)"},
       {label:"Управление",href:"https://console.firebase.google.com",text:"Firebase Console"},
     ]},
     {name:"Vercel (Хостинг)",color:"#000",icon:"▲",items:[
@@ -2632,12 +3352,25 @@ export function AdminDashboard() {
           <h2 style={{margin:0,fontSize:20,fontWeight:700}}>Иштерман Admin</h2>
           <p style={{margin:"4px 0 0",fontSize:13,color:"#888"}}>Панель управления</p>
         </div>
-        {err&&<div style={{background:"#FFF3F3",border:"1px solid #FFCDD2",borderRadius:8,padding:"10px 14px",marginBottom:16,color:"#C62828",fontSize:13}}>{err}</div>}
+        {err&&<div style={{background:"#FFF3F3",border:"1px solid #FFCDD2",borderRadius:8,padding:"10px 14px",marginBottom:12,color:"#C62828",fontSize:13}}>{err}</div>}
+        {successMsg&&<div style={{background:"#F1FFF3",border:"1px solid #A5D6A7",borderRadius:8,padding:"10px 14px",marginBottom:12,color:"#2E7D32",fontSize:13}}>{successMsg}</div>}
         <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email администратора"
           style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #ddd",fontSize:14,marginBottom:10,boxSizing:"border-box"}}/>
-        <input value={pass} onChange={e=>setPass(e.target.value)} type="password" placeholder="Пароль"
-          onKeyDown={e=>e.key==="Enter"&&login()}
-          style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #ddd",fontSize:14,marginBottom:16,boxSizing:"border-box"}}/>
+        <div style={{position:"relative",marginBottom:8}}>
+          <input value={pass} onChange={e=>setPass(e.target.value)} type={showPass?"text":"password"} placeholder="Пароль"
+            onKeyDown={e=>e.key==="Enter"&&login()}
+            style={{width:"100%",padding:"10px 44px 10px 14px",borderRadius:8,border:"1px solid #ddd",fontSize:14,boxSizing:"border-box"}}/>
+          <button onClick={()=>setShowPass(v=>!v)} type="button"
+            style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",padding:4,color:"#888",fontSize:18,lineHeight:1}}>
+            {showPass?"🙈":"👁️"}
+          </button>
+        </div>
+        <div style={{textAlign:"right",marginBottom:16}}>
+          <button onClick={resetPassword} type="button"
+            style={{background:"none",border:"none",color:"#185FA5",fontSize:13,cursor:"pointer",padding:0,textDecoration:"underline"}}>
+            Забыли пароль?
+          </button>
+        </div>
         <button onClick={login} disabled={loading}
           style={{width:"100%",padding:"12px",borderRadius:8,background:"#185FA5",color:"#fff",border:"none",fontSize:15,fontWeight:600,cursor:"pointer"}}>
           {loading?"Вход...":"Войти"}
@@ -2675,50 +3408,45 @@ export function AdminDashboard() {
         <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:600,color:"#333"}}>📊 Статистика в реальном времени</h3>
         {statsLoading&&!stats&&<div style={{textAlign:"center",padding:40,color:"#888"}}>Загрузка данных из Firestore...</div>}
         {stats&&(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:28}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(96px,1fr))",gap:8,marginBottom:24}}>
             {statCards.map(c=>(
-              <div key={c.key} style={{background:"#fff",borderRadius:12,padding:"16px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:`4px solid ${c.color}`}}>
-                <div style={{fontSize:20,marginBottom:4}}>{c.icon}</div>
-                <div style={{fontSize:11,color:"#888",marginBottom:2}}>{c.label}</div>
-                <div style={{fontSize:28,fontWeight:700,color:c.color}}>{stats[c.key]??0}</div>
+              <div key={c.key} style={{background:"#fff",borderRadius:10,padding:"8px 10px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:`3px solid ${c.color}`}}>
+                <div style={{fontSize:14,marginBottom:2}}>{c.icon}</div>
+                <div style={{fontSize:9,color:"#888",marginBottom:1,lineHeight:1.2}}>{c.label}</div>
+                <div style={{fontSize:18,fontWeight:700,color:c.color}}>{stats[c.key]??0}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Recent Registrations */}
-        {stats?.recentUsers?.length>0&&(
-          <div style={{marginBottom:28}}>
-            <h3 style={{margin:"0 0 14px",fontSize:15,fontWeight:600,color:"#333"}}>🆕 Последние регистрации</h3>
-            <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",overflow:"hidden"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead>
-                  <tr style={{background:"#f8f9fa"}}>
-                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Имя</th>
-                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Телефон</th>
-                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Роль</th>
-                    <th style={{padding:"10px 16px",textAlign:"left",fontWeight:600,color:"#555",borderBottom:"1px solid #eee"}}>Дата</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.recentUsers.map((u:any,i:number)=>(
-                    <tr key={i} style={{borderBottom:"1px solid #f0f0f0"}}>
-                      <td style={{padding:"10px 16px",fontWeight:500}}>{u.name}</td>
-                      <td style={{padding:"10px 16px",color:"#555"}}>{u.phone}</td>
-                      <td style={{padding:"10px 16px"}}>
-                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600,
-                          background:u.role==="customer"?"#E3F2FD":u.role==="executor"?"#E8F5E9":"#F3E8FF",
-                          color:u.role==="customer"?"#1565C0":u.role==="executor"?"#2E7D32":"#7C3D99"}}>
-                          {u.role==="customer"?"Заказчик":u.role==="executor"?"Исполнитель":u.role}
-                        </span>
-                      </td>
-                      <td style={{padding:"10px 16px",color:"#888",fontSize:12}}>
-                        {u.createdAt?new Date(u.createdAt).toLocaleDateString("ru-RU",{day:"2-digit",month:"short",year:"numeric"}):"—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* Today Registrations — живой счётчик, обновляется мгновенно без кнопки "Обновить" */}
+        <div style={{marginBottom:24}}>
+          <h3 style={{margin:"0 0 10px",fontSize:14,fontWeight:600,color:"#333"}}>🆕 Регистрации сегодня <span style={{fontWeight:400,fontSize:11,color:"#0F6E56"}}>● реальное время</span></h3>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{background:"#fff",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:"3px solid #1565C0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:12,color:"#888"}}>🧑‍💼 Заказчики</span>
+              <span style={{fontSize:22,fontWeight:700,color:"#1565C0"}}>{todayCustomers}</span>
+            </div>
+            <div style={{background:"#fff",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:"3px solid #0F6E56",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:12,color:"#888"}}>🔨 Исполнители</span>
+              <span style={{fontSize:22,fontWeight:700,color:"#0F6E56"}}>{todayExecutors}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Referrals */}
+        {stats&&(
+          <div style={{marginBottom:24}}>
+            <h3 style={{margin:"0 0 10px",fontSize:14,fontWeight:600,color:"#333"}}>🔗 Реферальная программа</h3>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div style={{background:"#fff",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:"3px solid #E65100",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:12,color:"#888"}}>👥 Пришли по ссылке</span>
+                <span style={{fontSize:22,fontWeight:700,color:"#E65100"}}>{stats.totalReferrals??0}</span>
+              </div>
+              <div style={{background:"#fff",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",borderLeft:"3px solid #7C3D99",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:12,color:"#888"}}>🙋 Пригласили друга</span>
+                <span style={{fontSize:22,fontWeight:700,color:"#7C3D99"}}>{stats.totalInviters??0}</span>
+              </div>
             </div>
           </div>
         )}
@@ -2753,7 +3481,7 @@ export function AdminDashboard() {
               {label:"Vercel Деплой",status:"✅ Работает",color:"#2E7D32"},
               {label:"Firebase Auth",status:"✅ Работает",color:"#2E7D32"},
               {label:"Firestore DB",status:stats?"✅ Подключён":"⏳ Проверка...",color:stats?"#2E7D32":"#B05E0A"},
-              {label:"Firebase Phone Auth (SMS)",status:"⚠️ Ожидание ответа поддержки",color:"#B05E0A"},
+              {label:"Firebase Phone Auth (SMS)",status:"⏸ Временно отключено (PIN-авторизация)",color:"#888"},
             ].map((item,i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<3?"1px solid #f5f5f5":"none"}}>
                 <span style={{fontSize:13,color:"#555"}}>{item.label}</span>

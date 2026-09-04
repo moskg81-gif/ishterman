@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "kg.ishterman.app",
+    "sha256_cert_fingerprints": [
+      "FB:F7:E4:8F:12:80:7F:18:EF:B6:7B:34:BC:7F:E1:43:8F:FD:B6:85:A8:38:9B:3E:1F:16:B0:5C:56:CB:F2:86"
+    ]
+  }
+}]
